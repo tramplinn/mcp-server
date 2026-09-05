@@ -17,7 +17,9 @@ RUN uv sync --frozen --no-dev --no-cache \
     && PIP_ROOT_USER_ACTION=ignore /usr/local/bin/python -m pip uninstall -y pip \
     && rm -f /usr/local/bin/uv
 
-RUN adduser -D -u 10001 -s /sbin/nologin appuser
+RUN adduser -D -u 10001 -s /sbin/nologin appuser \
+    && mkdir -p /home/appuser/.local/share \
+    && chown -R appuser:appuser /home/appuser
 USER appuser
 
 EXPOSE 8001
