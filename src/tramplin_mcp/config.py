@@ -13,10 +13,10 @@ class Settings:
     host: str
     port: int
     public_url: str
-    github_client_id: str
-    github_client_secret: str
+    oauth_base_url: str
+    oauth_client_id: str
+    oauth_client_secret: str
     jwt_signing_key: str
-    service_secret: str
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -30,17 +30,19 @@ class Settings:
             host=os.getenv("TRAMPLIN_MCP_HOST", "127.0.0.1"),
             port=int(os.getenv("TRAMPLIN_MCP_PORT", "8001")),
             public_url=os.getenv("TRAMPLIN_MCP_PUBLIC_URL", "http://localhost:8001").rstrip("/"),
-            github_client_id=os.getenv("TRAMPLIN_MCP_GITHUB_CLIENT_ID", "").strip(),
-            github_client_secret=os.getenv("TRAMPLIN_MCP_GITHUB_CLIENT_SECRET", "").strip(),
+            oauth_base_url=os.getenv(
+                "TRAMPLIN_OAUTH_BASE_URL", "http://localhost:8000/api/v1"
+            ).rstrip("/"),
+            oauth_client_id=os.getenv("TRAMPLIN_OAUTH_CLIENT_ID", "tramplin-fastmcp").strip(),
+            oauth_client_secret=os.getenv("TRAMPLIN_OAUTH_CLIENT_SECRET", "").strip(),
             jwt_signing_key=os.getenv("TRAMPLIN_MCP_JWT_SIGNING_KEY", "").strip(),
-            service_secret=os.getenv("TRAMPLIN_MCP_SERVICE_SECRET", "").strip(),
         )
 
     @property
     def oauth_configured(self) -> bool:
         return bool(
-            self.github_client_id
-            and self.github_client_secret
+            self.oauth_base_url
+            and self.oauth_client_id
+            and self.oauth_client_secret
             and self.jwt_signing_key
-            and self.service_secret
         )

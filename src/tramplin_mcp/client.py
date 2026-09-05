@@ -71,27 +71,6 @@ class TramplinClient:
             raise TramplinApiError(0, "invalid_response", "Expected a course list")
         return cast(list[dict[str, Any]], result)
 
-    async def exchange_mcp_identity(
-        self, provider: str, provider_id: str, service_secret: str
-    ) -> str:
-        try:
-            response = await self._http.post(
-                "/auth/mcp/exchange",
-                json={"provider": provider, "provider_id": provider_id},
-                headers={"X-MCP-Service-Secret": service_secret},
-            )
-        except httpx.HTTPError as exc:
-            raise TramplinApiError(0, "transport_error", str(exc)) from exc
-        if not response.is_success:
-            raise TramplinApiError(
-                response.status_code, "oauth_exchange_failed", "Tramplin rejected OAuth identity"
-            )
-        payload = response.json()
-        access_token = payload.get("access_token")
-        if not isinstance(access_token, str):
-            raise TramplinApiError(0, "invalid_response", "Expected an access token")
-        return access_token
-
     async def apply_course_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         result = await self.request("POST", "/authoring/course-plans/apply", json=payload)
         return _object(result, "course plan result")

@@ -3,8 +3,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
+import httpx
 from fastmcp import Context, FastMCP
-from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.auth import AccessToken, OAuthProxy, TokenVerifier
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.lifespan import lifespan
 from starlette.requests import Request
@@ -27,13 +28,48 @@ async def app_lifespan(_: FastMCP) -> AsyncIterator[dict[str, TramplinClient]]:
 
 
 startup_settings = Settings.from_env()
+
+
+class TramplinTokenVerifier(TokenVerifier):
+    def __init__(self, settings: Settings) -> None:
+        super().__init__(required_scopes=["authoring"])
+        self._api_url = settings.api_url
+        self._timeout = settings.request_timeout
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        try:
+            async with httpx.AsyncClient(base_url=self._api_url, timeout=self._timeout) as client:
+                response = await client.get(
+                    "/auth/mcp/introspect",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+        except httpx.HTTPError:
+            return None
+        if not response.is_success:
+            return None
+        payload = response.json()
+        return AccessToken(
+            token=token,
+            client_id=startup_settings.oauth_client_id,
+            subject=str(payload["sub"]),
+            scopes=["authoring"],
+            claims=payload,
+        )
+
+
 auth = (
-    GitHubProvider(
-        client_id=startup_settings.github_client_id,
-        client_secret=startup_settings.github_client_secret,
+    OAuthProxy(
+        upstream_authorization_endpoint=(f"{startup_settings.oauth_base_url}/auth/mcp/authorize"),
+        upstream_token_endpoint=f"{startup_settings.api_url}/auth/mcp/token",
+        upstream_revocation_endpoint=f"{startup_settings.api_url}/auth/mcp/revoke",
+        upstream_client_id=startup_settings.oauth_client_id,
+        upstream_client_secret=startup_settings.oauth_client_secret,
+        token_verifier=TramplinTokenVerifier(startup_settings),
         base_url=startup_settings.public_url,
         jwt_signing_key=startup_settings.jwt_signing_key,
-        require_authorization_consent=True,
+        valid_scopes=["authoring"],
+        require_authorization_consent="external",
+        token_endpoint_auth_method="client_secret_basic",  # noqa: S106
     )
     if startup_settings.oauth_configured
     else None
@@ -61,11 +97,7 @@ async def _client(ctx: Context) -> TramplinClient:
         if not settings.api_token:
             raise ValueError("TRAMPLIN_API_TOKEN is required for local stdio mode")
         return base.with_token(settings.api_token)
-    provider_id = access_token.claims.get("sub")
-    if not isinstance(provider_id, str) or not provider_id:
-        raise ValueError("GitHub OAuth token has no subject")
-    token = await base.exchange_mcp_identity("github", provider_id, settings.service_secret)
-    return base.with_token(token)
+    return base.with_token(access_token.token)
 
 
 @mcp.tool

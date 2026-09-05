@@ -32,9 +32,15 @@ Tramplin от имени преподавателя или администра�
 https://mcp.example.com/mcp
 ```
 
-Сервер использует browser OAuth. GitHub-аккаунт должен быть заранее привязан к
-существующему профилю Tramplin с ролью преподавателя или администратора. Студент,
-неактивный пользователь или непривязанный GitHub-аккаунт получит отказ.
+Сервер использует browser OAuth самого Tramplin. Пользователь входит в обычный
+аккаунт Tramplin и подтверждает доступ на странице Tramplin; GitHub и Яндекс
+остаются только способами входа в основной продукт. Студент или неактивный
+пользователь получит отказ. Доступ разрешён преподавателям и администраторам.
+
+Tramplin хранит authorization grants и OAuth access/refresh-токены в PostgreSQL.
+В базе находятся только SHA-256-хэши токенов; authorization code одноразовый,
+refresh ротируется при каждом обмене, а отозванные токены помечаются отдельно.
+Обычный access JWT веб-интерфейса MCP не принимает.
 
 ### Codex CLI и IDE
 
@@ -143,10 +149,10 @@ TRAMPLIN_MCP_TRANSPORT=http
 TRAMPLIN_MCP_HOST=0.0.0.0
 TRAMPLIN_MCP_PORT=8001
 TRAMPLIN_MCP_PUBLIC_URL=https://mcp-stage.example.com
-TRAMPLIN_MCP_GITHUB_CLIENT_ID=
-TRAMPLIN_MCP_GITHUB_CLIENT_SECRET=
+TRAMPLIN_OAUTH_BASE_URL=https://api.staging.example.com/api/v1
+TRAMPLIN_OAUTH_CLIENT_ID=tramplin-fastmcp
+TRAMPLIN_OAUTH_CLIENT_SECRET=
 TRAMPLIN_MCP_JWT_SIGNING_KEY=
-TRAMPLIN_MCP_SERVICE_SECRET=
 ```
 
 Для production замените backend alias на `tramplin-prod-api`. Общая
@@ -154,10 +160,18 @@ TRAMPLIN_MCP_SERVICE_SECRET=
 `tramplin-edge`. В её `.env` настройте `MCP_DOMAIN`, `MCP_STAGE_DOMAIN` и DNS
 A/AAAA записи обоих доменов на сервер.
 
-Создайте отдельное GitHub OAuth App для каждого окружения. Callback URL должен
-быть строго `https://<mcp-domain>/auth/callback`. Значение
-`TRAMPLIN_MCP_SERVICE_SECRET` должно совпадать с `MCP_SERVICE_SECRET` backend;
-это серверный секрет и он никогда не передаётся пользователю или MCP-клиенту.
+Для каждого окружения задайте backend-настройки с теми же client credentials:
+
+```dotenv
+MCP_OAUTH_CLIENT_ID=tramplin-fastmcp
+MCP_OAUTH_CLIENT_SECRET=<случайный-секрет>
+MCP_OAUTH_REDIRECT_URI=https://<mcp-domain>/auth/callback
+```
+
+`TRAMPLIN_OAUTH_CLIENT_SECRET` и `MCP_OAUTH_CLIENT_SECRET` должны совпадать. Это
+стандартные credentials конфиденциального OAuth-клиента между двумя сервисами;
+они не передаются пользователю, Codex или Claude Code. Отдельный вручную
+создаваемый MCP-токен и дополнительный service secret не используются.
 
 Локальные проверки:
 
