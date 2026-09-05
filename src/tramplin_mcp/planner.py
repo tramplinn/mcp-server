@@ -91,76 +91,6 @@ async def apply_plan(client: TramplinClient, plan: CoursePlan) -> ApplyResult:
     )
 
 
-async def _apply_module(
-    client: TramplinClient,
-    course_slug: str,
-    plan: ModulePlan,
-    module: dict[str, Any],
-    changes: list[Change],
-) -> tuple[list[Change], list[str]]:
-    applied: list[Change] = []
-    lessons = await _lesson_index(client, module)
-    lesson_ids: dict[str, str] = {}
-    for lesson_plan in plan.lessons:
-        path = f"{course_slug}/{plan.slug}/{lesson_plan.slug}"
-        change = _find_change(changes, "lesson", path)
-        lesson = lessons.get(lesson_plan.slug)
-        if lesson is None:
-            lesson = await client.create_lesson(
-                str(module["id"]), {**lesson_plan.model_dump(), "status": "draft"}
-            )
-        elif change.action == "update":
-            lesson = await client.update_lesson(
-                str(lesson["id"]), _selected_payload(lesson_plan, change.fields)
-            )
-        lesson_ids[lesson_plan.slug] = str(lesson["id"])
-        applied.append(change)
-
-    quizzes = await _quiz_index(client, module)
-    quiz_ids: dict[str, str] = {}
-    for quiz_plan in plan.quizzes:
-        path = f"{course_slug}/{plan.slug}/{quiz_plan.slug}"
-        change = _find_change(changes, "quiz", path)
-        lesson_id = lesson_ids.get(quiz_plan.lesson_slug or "")
-        quiz = quizzes.get(quiz_plan.slug)
-        payload = {"title": quiz_plan.title, "slug": quiz_plan.slug, "lesson_id": lesson_id}
-        if quiz is None:
-            quiz = await client.create_quiz(str(module["id"]), {**payload, "status": "draft"})
-            quiz["questions"] = []
-        elif change.action == "update":
-            quiz = await client.update_quiz(str(quiz["id"]), payload)
-            quiz = await client.get_quiz(str(quiz["id"]))
-        question_changes = await _apply_questions(client, path, quiz_plan, quiz, changes)
-        applied.extend([change, *question_changes])
-        quiz_ids[quiz_plan.slug] = str(quiz["id"])
-
-    ids = {**lesson_ids, **quiz_ids}
-    order = plan.content_order or [*lesson_ids, *quiz_ids]
-    return applied, [ids[slug] for slug in order]
-
-
-async def _apply_questions(
-    client: TramplinClient,
-    quiz_path: str,
-    plan: QuizPlan,
-    quiz: dict[str, Any],
-    changes: list[Change],
-) -> list[Change]:
-    current = {question["position"]: question for question in quiz.get("questions", [])}
-    applied: list[Change] = []
-    for question_plan in plan.questions:
-        path = f"{quiz_path}/questions/{question_plan.position}"
-        change = _find_change(changes, "question", path)
-        question = current.get(question_plan.position)
-        payload = question_plan.model_dump()
-        if question is None:
-            await client.create_question(str(quiz["id"]), payload)
-        elif change.action == "update":
-            await client.update_question(str(question["id"]), payload)
-        applied.append(change)
-    return applied
-
-
 async def _changes(
     client: TramplinClient, plan: CoursePlan, current: dict[str, Any] | None
 ) -> list[Change]:
@@ -202,7 +132,7 @@ async def _changes(
                 "title": quiz_plan.title,
                 "lesson_id": lesson_ids.get(quiz_plan.lesson_slug or ""),
             }
-            changes.append(_diff_dict("quiz", path, desired, quiz, QUIZ_FIELDS, str(quiz["id"])))
+            changes.append(_diff("quiz", path, desired, quiz, QUIZ_FIELDS, str(quiz["id"])))
             questions = {question["position"]: question for question in quiz.get("questions", [])}
             for question in quiz_plan.questions:
                 question_path = f"{path}/questions/{question.position}"
@@ -273,14 +203,15 @@ def _quiz_create_changes(path: str, plan: QuizPlan) -> list[Change]:
 
 
 def _diff(
-    kind: Literal["course", "module", "lesson", "question"],
+    kind: Literal["course", "module", "lesson", "quiz", "question"],
     path: str,
     desired: object,
     current: dict[str, Any],
     fields: tuple[str, ...],
     entity_id: str,
 ) -> Change:
-    changed = [field for field in fields if getattr(desired, field) != current.get(field)]
+    lookup = desired.get if isinstance(desired, dict) else lambda field: getattr(desired, field)
+    changed = [field for field in fields if lookup(field) != current.get(field)]
     return Change(
         action="update" if changed else "unchanged",
         kind=kind,
@@ -288,48 +219,6 @@ def _diff(
         entity_id=entity_id,
         fields=changed,
     )
-
-
-def _diff_dict(
-    kind: Literal["quiz"],
-    path: str,
-    desired: dict[str, Any],
-    current: dict[str, Any],
-    fields: tuple[str, ...],
-    entity_id: str,
-) -> Change:
-    changed = [field for field in fields if desired.get(field) != current.get(field)]
-    return Change(
-        action="update" if changed else "unchanged",
-        kind=kind,
-        path=path,
-        entity_id=entity_id,
-        fields=changed,
-    )
-
-
-def _selected_payload(model: object, fields: list[str]) -> dict[str, Any]:
-    return {field: getattr(model, field) for field in fields if field != "position"}
-
-
-def _course_payload(plan: CoursePlan) -> dict[str, Any]:
-    return {
-        "title": plan.title,
-        "slug": plan.slug,
-        "summary": plan.summary,
-        "color": plan.color,
-        "est_hours": plan.est_hours,
-        "status": "draft",
-    }
-
-
-def _find_change(changes: list[Change], kind: str, path: str) -> Change:
-    return next(change for change in changes if change.kind == kind and change.path == path)
-
-
-def _complete_order(desired: list[str], existing: list[str]) -> list[str]:
-    desired_set = set(desired)
-    return [*desired, *(item for item in existing if item not in desired_set)]
 
 
 def _warnings(current: dict[str, Any] | None) -> list[str]:

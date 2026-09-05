@@ -96,57 +96,9 @@ class TramplinClient:
         )
         return _object(result, "Markdown preview")
 
-    async def create_course(self, payload: dict[str, Any]) -> dict[str, Any]:
-        result = await self.request("POST", "/authoring/courses", json=payload)
-        return _object(result, "course")
-
-    async def update_course(self, course_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        result = await self.request("PATCH", f"/authoring/courses/{course_id}", json=payload)
-        return _object(result, "course")
-
-    async def create_module(self, course_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        result = await self.request("POST", f"/authoring/courses/{course_id}/modules", json=payload)
-        return _object(result, "module")
-
-    async def update_module(self, module_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        result = await self.request("PATCH", f"/authoring/modules/{module_id}", json=payload)
-        return _object(result, "module")
-
-    async def create_lesson(self, module_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        result = await self.request("POST", f"/authoring/modules/{module_id}/lessons", json=payload)
-        return _object(result, "lesson")
-
-    async def update_lesson(self, lesson_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        result = await self.request("PATCH", f"/authoring/lessons/{lesson_id}", json=payload)
-        return _object(result, "lesson")
-
     async def get_quiz(self, quiz_id: str) -> dict[str, Any]:
         result = await self.request("GET", f"/authoring/quizzes/{quiz_id}")
         return _object(result, "quiz")
-
-    async def create_quiz(self, module_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        result = await self.request("POST", f"/authoring/modules/{module_id}/quizzes", json=payload)
-        return _object(result, "quiz")
-
-    async def update_quiz(self, quiz_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        result = await self.request("PATCH", f"/authoring/quizzes/{quiz_id}", json=payload)
-        return _object(result, "quiz")
-
-    async def create_question(self, quiz_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        result = await self.request("POST", f"/authoring/quizzes/{quiz_id}/questions", json=payload)
-        return _object(result, "question")
-
-    async def update_question(self, question_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        result = await self.request("PATCH", f"/authoring/questions/{question_id}", json=payload)
-        return _object(result, "question")
-
-    async def reorder_modules(self, course_id: str, ids: list[str]) -> None:
-        await self.request(
-            "PUT", f"/authoring/courses/{course_id}/modules/order", json={"ids": ids}
-        )
-
-    async def reorder_module_content(self, module_id: str, ids: list[str]) -> None:
-        await self.request("PUT", f"/authoring/modules/{module_id}/order", json={"ids": ids})
 
 
 def _object(result: ApiResponse, label: str) -> dict[str, Any]:

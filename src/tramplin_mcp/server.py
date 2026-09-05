@@ -91,12 +91,11 @@ mcp = FastMCP(
 
 async def _client(ctx: Context) -> TramplinClient:
     base = cast(TramplinClient, ctx.lifespan_context["client"])
-    settings = Settings.from_env()
     access_token = get_access_token()
     if access_token is None:
-        if not settings.api_token:
+        if not startup_settings.api_token:
             raise ValueError("TRAMPLIN_API_TOKEN is required for local stdio mode")
-        return base.with_token(settings.api_token)
+        return base.with_token(startup_settings.api_token)
     return base.with_token(access_token.token)
 
 
