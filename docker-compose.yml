@@ -1,0 +1,44 @@
+services:
+  mcp:
+    build: .
+    image: ${MCP_IMAGE:-tramplin-mcp:local}
+    restart: unless-stopped
+    env_file:
+      - path: .env.runtime
+        required: false
+    environment:
+      XDG_DATA_HOME: /home/appuser/.local/share
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    volumes:
+      - oauth_data:/home/appuser/.local/share
+    ports:
+      - "127.0.0.1:${TRAMPLIN_MCP_PORT:-8001}:8001"
+    networks:
+      edge:
+        aliases:
+          - ${COMPOSE_PROJECT_NAME:-tramplin}-mcp
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=2)",
+        ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+networks:
+  edge:
+    external: true
+    name: tramplin-edge
+
+volumes:
+  oauth_data:
