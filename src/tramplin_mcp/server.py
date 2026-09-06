@@ -111,13 +111,24 @@ async def inspect_course(slug: str, ctx: Context) -> dict[str, Any]:
     course = await (await _client(ctx)).get_course(slug)
     if course is None:
         return {"found": False, "slug": slug}
-    return {"found": True, "course": course}
+    return {"found": True, "course": cast(dict[str, Any], _omit_body_html(course))}
 
 
 @mcp.tool
 async def inspect_lesson(lesson_id: str, ctx: Context) -> dict[str, Any]:
     """Read one lesson including its Markdown source."""
-    return await (await _client(ctx)).get_lesson(lesson_id)
+    lesson = await (await _client(ctx)).get_lesson(lesson_id)
+    return cast(dict[str, Any], _omit_body_html(lesson))
+
+
+def _omit_body_html(value: object) -> object:
+    """body_html is fully derived from body_md and roughly doubles lesson payload size for no
+    new information; authoring only needs body_md. Use preview_markdown to see the rendered HTML."""
+    if isinstance(value, dict):
+        return {key: _omit_body_html(item) for key, item in value.items() if key != "body_html"}
+    if isinstance(value, list):
+        return [_omit_body_html(item) for item in value]
+    return value
 
 
 @mcp.tool

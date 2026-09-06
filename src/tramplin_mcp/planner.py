@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from pydantic import BaseModel
+
 from tramplin_mcp.client import TramplinClient
 from tramplin_mcp.models import (
     ApplyResult,
@@ -10,7 +12,6 @@ from tramplin_mcp.models import (
     CoursePlanPreview,
     CoursePlanValidation,
     ModulePlan,
-    QuestionPlan,
     QuizPlan,
     ValidationIssue,
 )
@@ -46,16 +47,6 @@ async def validate_plan(client: TramplinClient, plan: CoursePlan) -> CoursePlanV
                 issues.append(
                     ValidationIssue(severity="warning", path=path, message="Тест без вопросов")
                 )
-            for question in quiz.questions:
-                message = _question_error(question)
-                if message:
-                    issues.append(
-                        ValidationIssue(
-                            severity="error",
-                            path=f"{path}/questions/{question.position}",
-                            message=message,
-                        )
-                    )
     return CoursePlanValidation(
         valid=not any(issue.severity == "error" for issue in issues), issues=issues
     )
@@ -211,7 +202,7 @@ def _diff(
     entity_id: str,
 ) -> Change:
     lookup = desired.get if isinstance(desired, dict) else lambda field: getattr(desired, field)
-    changed = [field for field in fields if lookup(field) != current.get(field)]
+    changed = [field for field in fields if _plain(lookup(field)) != current.get(field)]
     return Change(
         action="update" if changed else "unchanged",
         kind=kind,
@@ -225,24 +216,12 @@ def _warnings(current: dict[str, Any] | None) -> list[str]:
     return [] if current is None else ["Additive-only: сущности вне плана сохраняются в конце."]
 
 
-def _question_error(question: QuestionPlan) -> str | None:
-    answer = question.answer
-    if question.type == "single" and "value" in answer:
-        return None
-    if question.type == "multiple" and isinstance(answer.get("values"), list):
-        return None
-    if question.type == "text":
-        accepted = answer.get("accepted")
-        if (
-            isinstance(accepted, list)
-            and accepted
-            and all(isinstance(item, str) for item in accepted)
-        ):
-            return None
-    if question.type == "file" and not answer:
-        return None
-    if question.type in {"matching", "grouping"}:
-        key = "pairs" if question.type == "matching" else "groups"
-        if isinstance(answer.get(key), dict) and answer[key]:
-            return None
-    return f"Неверный формат answer для типа {question.type}"
+def _plain(value: object) -> object:
+    """`desired` values from a CoursePlan are typed models; `current` comes from the API as
+    plain JSON. Question `answer`/`options` in particular are now per-type pydantic models
+    (see QuestionPlan), so they need dumping before they can be compared to the API's dicts."""
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, list):
+        return [_plain(item) for item in value]
+    return value

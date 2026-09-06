@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Slug = str
 SLUG_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
+_SLUG_DOC = "Lowercase, hyphen-separated identifier (e.g. 'intro-to-loops'); also used in URLs."
 
 
 class McpModel(BaseModel):
@@ -14,27 +15,178 @@ class McpModel(BaseModel):
 
 
 class LessonPlan(McpModel):
-    title: str = Field(min_length=1, max_length=200)
-    slug: Slug = Field(pattern=SLUG_PATTERN, max_length=120)
-    body_md: str = ""
-    est_minutes: int | None = Field(default=None, ge=1, le=32767)
+    title: str = Field(min_length=1, max_length=200, description="Lesson title shown to students.")
+    slug: Slug = Field(pattern=SLUG_PATTERN, max_length=120, description=_SLUG_DOC)
+    body_md: str = Field(
+        default="", description="Lesson content as Markdown; this is the source of truth."
+    )
+    est_minutes: int | None = Field(
+        default=None,
+        ge=1,
+        le=32767,
+        description="Estimated time to complete the lesson, in minutes.",
+    )
 
 
-class QuestionPlan(McpModel):
-    position: int = Field(ge=0)
-    prompt_md: str = Field(min_length=1)
-    type: Literal["single", "multiple", "text", "matching", "grouping", "file"]
-    options: list[Any] = Field(default_factory=list)
-    answer: dict[str, Any]
-    explain_md: str | None = None
-    attachment_ids: list[str] = Field(default_factory=list)
+class PlainOption(McpModel):
+    """A choice offered to the student in a single/multiple-choice question."""
+
+    id: str = Field(description="Stable id for this choice; referenced from `answer`.")
+    label: str = Field(min_length=1, description="Text of this choice, shown to the student.")
+
+
+class MatchingOption(McpModel):
+    """One side of a matching question: every option is a 'left' or a 'right' item."""
+
+    id: str = Field(description="Stable id for this option; referenced from `answer.pairs`.")
+    label: str = Field(min_length=1, description="Text of this option, shown to the student.")
+    kind: Literal["left", "right"] = Field(
+        description=(
+            "Which column this option is in. Students draw a line from each 'left' to one 'right'."
+        )
+    )
+
+
+class GroupingOption(McpModel):
+    """One entry of a grouping question: an option is a sortable 'item' or a target 'group'."""
+
+    id: str = Field(description="Stable id for this option; referenced from `answer.groups`.")
+    label: str = Field(min_length=1, description="Text of this option, shown to the student.")
+    kind: Literal["item", "group"] = Field(
+        description="Whether this is a sortable 'item' or the 'group' items get dropped into."
+    )
+
+
+class SingleAnswer(McpModel):
+    value: str = Field(description="id (from `options`) of the one correct choice.")
+
+
+class MultipleAnswer(McpModel):
+    values: list[str] = Field(description="ids (from `options`) of every correct choice.")
+
+
+class TextAnswer(McpModel):
+    accepted: list[str] = Field(
+        min_length=1,
+        description=(
+            "Exact-match strings that count as correct; the student's answer must equal one."
+        ),
+    )
+
+
+class FileAnswer(McpModel):
+    """File-upload questions have no answer key: a teacher grades the submission by hand."""
+
+
+class MatchingAnswer(McpModel):
+    pairs: dict[str, str] = Field(
+        min_length=1,
+        description="Maps every 'left' option id (from `options`) to its matching 'right' id.",
+    )
+
+
+class GroupingAnswer(McpModel):
+    groups: dict[str, str] = Field(
+        min_length=1,
+        description="Maps every 'item' option id (from `options`) to the 'group' id it belongs in.",
+    )
+
+
+class QuestionPlanBase(McpModel):
+    position: int = Field(ge=0, description="0-based order of this question within the quiz.")
+    prompt_md: str = Field(min_length=1, description="Question text, rendered as Markdown.")
+    explain_md: str | None = Field(
+        default=None,
+        description="Optional Markdown shown after answering, explaining the correct answer.",
+    )
+    attachment_ids: list[str] = Field(
+        default_factory=list,
+        description="ids of library assets to attach to this question, e.g. an image.",
+    )
+
+
+class SingleQuestionPlan(QuestionPlanBase):
+    """Exactly one correct choice out of several options."""
+
+    type: Literal["single"]
+    options: list[PlainOption] = Field(description="The choices offered to the student.")
+    answer: SingleAnswer
+
+
+class MultipleQuestionPlan(QuestionPlanBase):
+    """One or more correct choices out of several options."""
+
+    type: Literal["multiple"]
+    options: list[PlainOption] = Field(description="The choices offered to the student.")
+    answer: MultipleAnswer
+
+
+class TextQuestionPlan(QuestionPlanBase):
+    """A free-text answer, graded by exact match against a set of accepted strings."""
+
+    type: Literal["text"]
+    options: list[Any] = Field(
+        default_factory=list, description="Unused for this question type; leave empty."
+    )
+    answer: TextAnswer
+
+
+class FileQuestionPlan(QuestionPlanBase):
+    """The student uploads a file; there is no automatic grading."""
+
+    type: Literal["file"]
+    options: list[Any] = Field(
+        default_factory=list, description="Unused for this question type; leave empty."
+    )
+    answer: FileAnswer = Field(
+        default_factory=FileAnswer, description="Always empty: file answers are graded manually."
+    )
+
+
+class MatchingQuestionPlan(QuestionPlanBase):
+    """The student draws lines connecting each 'left' option to one 'right' option."""
+
+    type: Literal["matching"]
+    options: list[MatchingOption] = Field(
+        description="Every 'left' and 'right' option to match, combined in one flat list."
+    )
+    answer: MatchingAnswer
+
+
+class GroupingQuestionPlan(QuestionPlanBase):
+    """The student sorts each 'item' option into one of several 'group' options."""
+
+    type: Literal["grouping"]
+    options: list[GroupingOption] = Field(
+        description="Every 'item' and 'group' option, combined in one flat list."
+    )
+    answer: GroupingAnswer
+
+
+QuestionPlan = Annotated[
+    SingleQuestionPlan
+    | MultipleQuestionPlan
+    | TextQuestionPlan
+    | FileQuestionPlan
+    | MatchingQuestionPlan
+    | GroupingQuestionPlan,
+    Field(discriminator="type"),
+]
 
 
 class QuizPlan(McpModel):
-    title: str = Field(min_length=1, max_length=200)
-    slug: Slug = Field(pattern=SLUG_PATTERN, max_length=120)
-    lesson_slug: Slug | None = Field(default=None, pattern=SLUG_PATTERN, max_length=120)
-    questions: list[QuestionPlan] = Field(default_factory=list)
+    title: str = Field(min_length=1, max_length=200, description="Quiz title shown to students.")
+    slug: Slug = Field(pattern=SLUG_PATTERN, max_length=120, description=_SLUG_DOC)
+    lesson_slug: Slug | None = Field(
+        default=None,
+        pattern=SLUG_PATTERN,
+        max_length=120,
+        description="slug of a lesson in this module to attach the quiz to; omit for standalone.",
+    )
+    questions: list[QuestionPlan] = Field(
+        default_factory=list,
+        description="Questions in display order; `position` must still be set on each.",
+    )
 
     @model_validator(mode="after")
     def unique_question_positions(self) -> Self:
@@ -43,12 +195,22 @@ class QuizPlan(McpModel):
 
 
 class ModulePlan(McpModel):
-    title: str = Field(min_length=1, max_length=200)
-    slug: Slug = Field(pattern=SLUG_PATTERN, max_length=120)
-    summary: str | None = None
-    lessons: list[LessonPlan] = Field(default_factory=list)
-    quizzes: list[QuizPlan] = Field(default_factory=list)
-    content_order: list[Slug] = Field(default_factory=list)
+    title: str = Field(min_length=1, max_length=200, description="Module title shown to students.")
+    slug: Slug = Field(pattern=SLUG_PATTERN, max_length=120, description=_SLUG_DOC)
+    summary: str | None = Field(default=None, description="Short description of the module.")
+    lessons: list[LessonPlan] = Field(
+        default_factory=list, description="Lessons to create or update."
+    )
+    quizzes: list[QuizPlan] = Field(
+        default_factory=list, description="Quizzes to create or update."
+    )
+    content_order: list[Slug] = Field(
+        default_factory=list,
+        description=(
+            "Lesson and quiz slugs from this module, in the order they should appear. Must "
+            "list every slug exactly once; leave empty to keep the order given above."
+        ),
+    )
 
     @model_validator(mode="after")
     def unique_lesson_slugs(self) -> Self:
@@ -63,12 +225,27 @@ class ModulePlan(McpModel):
 
 
 class CoursePlan(McpModel):
-    title: str = Field(min_length=1, max_length=200)
-    slug: Slug = Field(pattern=SLUG_PATTERN, max_length=120)
-    summary: str | None = None
-    color: str | None = Field(default=None, max_length=16)
-    est_hours: int | None = Field(default=None, ge=1, le=32767)
-    modules: list[ModulePlan] = Field(default_factory=list)
+    """The complete desired state of a course. Applying a plan is idempotent and
+    additive-only: existing modules/lessons/quizzes not mentioned in the plan are kept."""
+
+    title: str = Field(min_length=1, max_length=200, description="Course title shown to students.")
+    slug: Slug = Field(
+        pattern=SLUG_PATTERN,
+        max_length=120,
+        description=(f"{_SLUG_DOC} An existing course with this slug is updated, not duplicated."),
+    )
+    summary: str | None = Field(default=None, description="Short description of the course.")
+    color: str | None = Field(
+        default=None,
+        max_length=16,
+        description="Accent color for the course card, e.g. a hex code like '#3572a5'.",
+    )
+    est_hours: int | None = Field(
+        default=None, ge=1, le=32767, description="Estimated time to complete the course, in hours."
+    )
+    modules: list[ModulePlan] = Field(
+        default_factory=list, description="Modules to create or update, in display order."
+    )
 
     @model_validator(mode="after")
     def unique_module_slugs(self) -> Self:
@@ -77,37 +254,54 @@ class CoursePlan(McpModel):
 
 
 class Change(McpModel):
-    action: Literal["create", "update", "unchanged"]
-    kind: Literal["course", "module", "lesson", "quiz", "question", "order"]
-    path: str
-    entity_id: str | None = None
-    fields: list[str] = Field(default_factory=list)
+    action: Literal["create", "update", "unchanged"] = Field(
+        description="What applying the plan would do to this entity."
+    )
+    kind: Literal["course", "module", "lesson", "quiz", "question", "order"] = Field(
+        description="Type of entity this change applies to."
+    )
+    path: str = Field(description="Human-readable location, e.g. 'python/basics/intro'.")
+    entity_id: str | None = Field(
+        default=None, description="id of the existing entity, if it already exists."
+    )
+    fields: list[str] = Field(
+        default_factory=list,
+        description="Which fields would change; empty when action is 'create' or 'unchanged'.",
+    )
 
 
 class CoursePlanPreview(McpModel):
     course_slug: str
-    changes: list[Change]
-    creates: int
-    updates: int
-    unchanged: int
-    warnings: list[str] = Field(default_factory=list)
+    changes: list[Change] = Field(
+        description="Every create/update/unchanged change the plan would make."
+    )
+    creates: int = Field(description="Number of new entities the plan would create.")
+    updates: int = Field(description="Number of existing entities the plan would modify.")
+    unchanged: int = Field(description="Number of existing entities the plan leaves untouched.")
+    warnings: list[str] = Field(
+        default_factory=list, description="Non-blocking notes about applying this plan."
+    )
 
 
 class ApplyResult(McpModel):
     course_slug: str
-    completed: bool
-    changes: list[Change]
-    warnings: list[str] = Field(default_factory=list)
+    completed: bool = Field(description="Whether the plan was applied successfully.")
+    changes: list[Change] = Field(description="Every create/update/unchanged change that was made.")
+    warnings: list[str] = Field(
+        default_factory=list, description="Non-blocking notes about what was applied."
+    )
 
 
 class ValidationIssue(McpModel):
-    severity: Literal["error", "warning"]
-    path: str
-    message: str
+    severity: Literal["error", "warning"] = Field(
+        description="'error' blocks apply_course_plan; 'warning' does not."
+    )
+    path: str = Field(description="Human-readable location, e.g. 'python/basics/intro'.")
+    message: str = Field(description="Description of the issue.")
 
 
 class CoursePlanValidation(McpModel):
-    valid: bool
+    valid: bool = Field(description="True when there are no 'error'-severity issues.")
     issues: list[ValidationIssue] = Field(default_factory=list)
 
 
