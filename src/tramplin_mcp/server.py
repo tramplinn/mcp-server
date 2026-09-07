@@ -40,7 +40,7 @@ class TramplinTokenVerifier(TokenVerifier):
         try:
             async with httpx.AsyncClient(base_url=self._api_url, timeout=self._timeout) as client:
                 response = await client.get(
-                    "/auth/mcp/introspect",
+                    "/oauth/introspect",
                     headers={"Authorization": f"Bearer {token}"},
                 )
         except httpx.HTTPError:
@@ -59,9 +59,9 @@ class TramplinTokenVerifier(TokenVerifier):
 
 auth = (
     OAuthProxy(
-        upstream_authorization_endpoint=(f"{startup_settings.oauth_base_url}/auth/mcp/authorize"),
-        upstream_token_endpoint=f"{startup_settings.api_url}/auth/mcp/token",
-        upstream_revocation_endpoint=f"{startup_settings.api_url}/auth/mcp/revoke",
+        upstream_authorization_endpoint=(f"{startup_settings.oauth_base_url}/oauth/authorize"),
+        upstream_token_endpoint=f"{startup_settings.api_url}/oauth/token",
+        upstream_revocation_endpoint=f"{startup_settings.api_url}/oauth/revoke",
         upstream_client_id=startup_settings.oauth_client_id,
         upstream_client_secret=startup_settings.oauth_client_secret,
         token_verifier=TramplinTokenVerifier(startup_settings),
