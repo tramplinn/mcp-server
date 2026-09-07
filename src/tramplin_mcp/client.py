@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, cast
 
 import httpx
@@ -12,7 +13,10 @@ class TramplinApiError(RuntimeError):
         self.status_code = status_code
         self.code = code
         self.details = details
-        super().__init__(f"Tramplin API error {status_code} ({code}): {message}")
+        text = f"Tramplin API error {status_code} ({code}): {message}"
+        if details:
+            text = f"{text} — {json.dumps(details, ensure_ascii=False)}"
+        super().__init__(text)
 
 
 class TramplinClient:
