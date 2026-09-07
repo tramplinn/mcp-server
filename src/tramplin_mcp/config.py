@@ -1,42 +1,47 @@
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass
+from typing import Annotated
+
+from pydantic import BeforeValidator, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-@dataclass(frozen=True, slots=True)
-class Settings:
-    api_url: str
-    api_token: str
-    request_timeout: float
-    transport: str
-    host: str
-    port: int
-    public_url: str
-    oauth_base_url: str
-    oauth_client_id: str
-    oauth_client_secret: str
-    jwt_signing_key: str
+def _strip(value: object) -> object:
+    return value.strip() if isinstance(value, str) else value
 
-    @classmethod
-    def from_env(cls) -> Settings:
-        api_url = os.getenv("TRAMPLIN_API_URL", "http://localhost:8000/api/v1").rstrip("/")
-        token = os.getenv("TRAMPLIN_API_TOKEN", "").strip()
-        return cls(
-            api_url=api_url,
-            api_token=token,
-            request_timeout=float(os.getenv("TRAMPLIN_API_TIMEOUT", "30")),
-            transport=os.getenv("TRAMPLIN_MCP_TRANSPORT", "http"),
-            host=os.getenv("TRAMPLIN_MCP_HOST", "127.0.0.1"),
-            port=int(os.getenv("TRAMPLIN_MCP_PORT", "8001")),
-            public_url=os.getenv("TRAMPLIN_MCP_PUBLIC_URL", "http://localhost:8001").rstrip("/"),
-            oauth_base_url=os.getenv(
-                "TRAMPLIN_OAUTH_BASE_URL", "http://localhost:8000/api/v1"
-            ).rstrip("/"),
-            oauth_client_id=os.getenv("TRAMPLIN_OAUTH_CLIENT_ID", "tramplin-fastmcp").strip(),
-            oauth_client_secret=os.getenv("TRAMPLIN_OAUTH_CLIENT_SECRET", "").strip(),
-            jwt_signing_key=os.getenv("TRAMPLIN_MCP_JWT_SIGNING_KEY", "").strip(),
-        )
+
+def _strip_trailing_slash(value: object) -> object:
+    return value.rstrip("/") if isinstance(value, str) else value
+
+
+Stripped = Annotated[str, BeforeValidator(_strip)]
+UrlNoTrailingSlash = Annotated[str, BeforeValidator(_strip_trailing_slash)]
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    api_url: UrlNoTrailingSlash = Field(
+        default="http://localhost:8000/api/v1", validation_alias="TRAMPLIN_API_URL"
+    )
+    api_token: Stripped = Field(default="", validation_alias="TRAMPLIN_API_TOKEN")
+    request_timeout: float = Field(default=30.0, validation_alias="TRAMPLIN_API_TIMEOUT")
+    transport: str = Field(default="http", validation_alias="TRAMPLIN_MCP_TRANSPORT")
+    host: str = Field(default="127.0.0.1", validation_alias="TRAMPLIN_MCP_HOST")
+    port: int = Field(default=8001, validation_alias="TRAMPLIN_MCP_PORT")
+    public_url: UrlNoTrailingSlash = Field(
+        default="http://localhost:8001", validation_alias="TRAMPLIN_MCP_PUBLIC_URL"
+    )
+    oauth_base_url: UrlNoTrailingSlash = Field(
+        default="http://localhost:8000/api/v1", validation_alias="TRAMPLIN_OAUTH_BASE_URL"
+    )
+    oauth_client_id: Stripped = Field(
+        default="tramplin-fastmcp", validation_alias="TRAMPLIN_OAUTH_CLIENT_ID"
+    )
+    oauth_client_secret: Stripped = Field(
+        default="", validation_alias="TRAMPLIN_OAUTH_CLIENT_SECRET"
+    )
+    jwt_signing_key: Stripped = Field(default="", validation_alias="TRAMPLIN_MCP_JWT_SIGNING_KEY")
 
     @property
     def oauth_configured(self) -> bool:

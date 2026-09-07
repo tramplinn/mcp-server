@@ -7,6 +7,7 @@ dependencies = [
     "fastmcp>=3.4.7,<4",
     "httpx>=0.28.1,<1",
     "pydantic>=2.13.5,<3",
+    "pydantic-settings>=2.15.0,<3",
     "starlette>=1.0.1",
 ]
 
@@ -16,6 +17,8 @@ tramplin-mcp = "tramplin_mcp.server:main"
 [dependency-groups]
 dev = [
     "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "ruff>=0.16.5",
 ]
 
@@ -29,7 +32,7 @@ packages = ["src/tramplin_mcp"]
 [tool.ruff]
 line-length = 100
 target-version = "py314"
-src = ["src"]
+src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = [
@@ -38,6 +41,13 @@ select = [
 ]
 ignore = ["RUF001", "RUF002", "RUF003"]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S106", "S107", "ANN401"]
+
 [tool.mypy]
 python_version = "3.14"
 strict = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

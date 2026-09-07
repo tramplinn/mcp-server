@@ -3,77 +3,29 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
-import httpx
 from fastmcp import Context, FastMCP
-from fastmcp.server.auth import AccessToken, OAuthProxy, TokenVerifier
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.lifespan import lifespan
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from tramplin_mcp.auth import build_auth
 from tramplin_mcp.client import TramplinClient
 from tramplin_mcp.config import Settings
 from tramplin_mcp.models import ApplyResult, CoursePlan, CoursePlanPreview, CoursePlanValidation
 from tramplin_mcp.planner import apply_plan, preview_plan, validate_plan
 
+settings = Settings()
+auth = build_auth(settings)
+
 
 @lifespan
 async def app_lifespan(_: FastMCP) -> AsyncIterator[dict[str, TramplinClient]]:
-    settings = Settings.from_env()
     client = TramplinClient(settings.api_url, settings.api_token, settings.request_timeout)
     try:
         yield {"client": client}
     finally:
         await client.close()
-
-
-startup_settings = Settings.from_env()
-
-
-class TramplinTokenVerifier(TokenVerifier):
-    def __init__(self, settings: Settings) -> None:
-        super().__init__(required_scopes=["authoring"])
-        self._api_url = settings.api_url
-        self._timeout = settings.request_timeout
-
-    async def verify_token(self, token: str) -> AccessToken | None:
-        try:
-            async with httpx.AsyncClient(base_url=self._api_url, timeout=self._timeout) as client:
-                response = await client.get(
-                    "/oauth/introspect",
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-        except httpx.HTTPError:
-            return None
-        if not response.is_success:
-            return None
-        payload = response.json()
-        return AccessToken(
-            token=token,
-            client_id=startup_settings.oauth_client_id,
-            subject=str(payload["sub"]),
-            scopes=["authoring"],
-            claims=payload,
-        )
-
-
-auth = (
-    OAuthProxy(
-        upstream_authorization_endpoint=(f"{startup_settings.oauth_base_url}/oauth/authorize"),
-        upstream_token_endpoint=f"{startup_settings.api_url}/oauth/token",
-        upstream_revocation_endpoint=f"{startup_settings.api_url}/oauth/revoke",
-        upstream_client_id=startup_settings.oauth_client_id,
-        upstream_client_secret=startup_settings.oauth_client_secret,
-        token_verifier=TramplinTokenVerifier(startup_settings),
-        base_url=startup_settings.public_url,
-        jwt_signing_key=startup_settings.jwt_signing_key,
-        valid_scopes=["authoring"],
-        require_authorization_consent="external",
-        token_endpoint_auth_method="client_secret_basic",  # noqa: S106
-    )
-    if startup_settings.oauth_configured
-    else None
-)
 
 
 mcp = FastMCP(
@@ -93,9 +45,9 @@ async def _client(ctx: Context) -> TramplinClient:
     base = cast(TramplinClient, ctx.lifespan_context["client"])
     access_token = get_access_token()
     if access_token is None:
-        if not startup_settings.api_token:
+        if not settings.api_token:
             raise ValueError("TRAMPLIN_API_TOKEN is required for local stdio mode")
-        return base.with_token(startup_settings.api_token)
+        return base.with_token(settings.api_token)
     return base.with_token(access_token.token)
 
 
@@ -161,7 +113,6 @@ async def health(_: Request) -> JSONResponse:
 
 
 def main() -> None:
-    settings = Settings.from_env()
     if settings.transport == "stdio":
         mcp.run(transport="stdio")
         return
