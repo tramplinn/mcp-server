@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel
 
 from tramplin_mcp.client import TramplinClient
-from tramplin_mcp.models import Change, CoursePlan, ModulePlan, QuizPlan
+from tramplin_mcp.models import Change, ChangeKind, CoursePlan, ModulePlan, QuizPlan
 
 COURSE_FIELDS = ("title", "summary", "color", "est_hours")
 MODULE_FIELDS = ("title", "summary")
@@ -128,7 +128,7 @@ def _quiz_create_changes(path: str, plan: QuizPlan) -> list[Change]:
 
 
 def _diff(
-    kind: Literal["course", "module", "lesson", "quiz", "question"],
+    kind: ChangeKind,
     path: str,
     desired: object,
     current: dict[str, Any],

@@ -157,6 +157,33 @@ async def test_reorder_track_courses_puts_ordered_ids() -> None:
     await make_client(handler).reorder_track_courses("t1", ["c2", "c1"])
 
 
+async def test_list_problems_unwraps_paginated_envelope() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"items": [{"slug": "two-sum"}], "total": 1, "limit": 20, "offset": 0},
+        )
+
+    assert await make_client(handler).list_problems() == [{"slug": "two-sum"}]
+
+
+async def test_get_problem_by_slug_returns_none_on_404() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"code": "not_found", "message": "нет"})
+
+    assert await make_client(handler).get_problem_by_slug("missing") is None
+
+
+async def test_apply_algorithm_plan_posts_to_expected_path() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/authoring/algorithm-plans/apply"
+        return httpx.Response(200, json={"created": 1, "updated": 0, "unchanged": 0})
+
+    result = await make_client(handler).apply_algorithm_plan({"problems": []})
+    assert result == {"created": 1, "updated": 0, "unchanged": 0}
+
+
 async def test_with_token_shares_http_client_but_not_ownership() -> None:
     seen_tokens = []
 

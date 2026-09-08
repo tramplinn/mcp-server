@@ -115,6 +115,17 @@ class TramplinClient:
             json={"course_ids": course_ids},
         )
 
+    async def list_problems(self) -> list[dict[str, Any]]:
+        result = await self.request("GET", "/authoring/algorithms/problems")
+        return _list(result, "problem")
+
+    async def get_problem_by_slug(self, slug: str) -> dict[str, Any] | None:
+        return await self._get_or_none(f"/authoring/algorithms/problems/slug/{slug}", "problem")
+
+    async def apply_algorithm_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        result = await self.request("POST", "/authoring/algorithm-plans/apply", json=payload)
+        return _object(result, "algorithm plan result")
+
     async def _get_or_none(self, path: str, label: str) -> dict[str, Any] | None:
         try:
             result = await self.request("GET", path)

@@ -9,10 +9,28 @@ from fastmcp.server.lifespan import lifespan
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from tramplin_mcp.algorithm_planner import (
+    apply_plan as apply_algorithm_plan_impl,
+)
+from tramplin_mcp.algorithm_planner import (
+    preview_plan as preview_algorithm_plan_impl,
+)
+from tramplin_mcp.algorithm_planner import (
+    validate_plan as validate_algorithm_plan_impl,
+)
 from tramplin_mcp.auth import build_auth
 from tramplin_mcp.client import TramplinClient
 from tramplin_mcp.config import Settings
-from tramplin_mcp.models import ApplyResult, CoursePlan, CoursePlanPreview, CoursePlanValidation
+from tramplin_mcp.models import (
+    AlgorithmPlan,
+    AlgorithmPlanApplyResult,
+    AlgorithmPlanPreview,
+    AlgorithmPlanValidation,
+    ApplyResult,
+    CoursePlan,
+    CoursePlanPreview,
+    CoursePlanValidation,
+)
 from tramplin_mcp.planner import apply_plan, preview_plan, validate_plan
 
 settings = Settings()
@@ -36,7 +54,9 @@ mcp = FastMCP(
         "apply_course_plan. Plans only create or update drafts and never delete content. Never "
         "claim that content was published: this server has no publishing tool. Tracks group "
         "existing courses: use inspect_track before create_track/attach_course_to_track, and "
-        "attach_course_to_track (not a course plan) to add a course to a track."
+        "attach_course_to_track (not a course plan) to add a course to a track. Problems are a "
+        "flat bank: use preview_algorithm_plan before apply_algorithm_plan; it never runs "
+        "validate_template, so a plan applying cleanly does not mean solutions pass their tests."
     ),
     lifespan=app_lifespan,
     auth=auth,
@@ -151,6 +171,39 @@ async def reorder_track_courses(
     """Set the display order of a track's courses; the list must include every attached course."""
     await (await _client(ctx)).reorder_track_courses(track_id, course_ids)
     return {"reordered": True}
+
+
+@mcp.tool
+async def list_problems(ctx: Context) -> list[dict[str, Any]]:
+    """List all algorithmic problems visible to the authenticated teacher, including drafts."""
+    return await (await _client(ctx)).list_problems()
+
+
+@mcp.tool
+async def inspect_problem(slug: str, ctx: Context) -> dict[str, Any]:
+    """Read one problem, including its test cases and language templates, before editing."""
+    problem = await (await _client(ctx)).get_problem_by_slug(slug)
+    if problem is None:
+        return {"found": False, "slug": slug}
+    return {"found": True, "problem": problem}
+
+
+@mcp.tool
+async def preview_algorithm_plan(plan: AlgorithmPlan, ctx: Context) -> AlgorithmPlanPreview:
+    """Compare a desired bank of problems with Tramplin without changing data."""
+    return await preview_algorithm_plan_impl(await _client(ctx), plan)
+
+
+@mcp.tool
+async def validate_algorithm_plan(plan: AlgorithmPlan, ctx: Context) -> AlgorithmPlanValidation:
+    """Validate provider/URL consistency and test-case coverage without writes."""
+    return await validate_algorithm_plan_impl(await _client(ctx), plan)
+
+
+@mcp.tool
+async def apply_algorithm_plan(plan: AlgorithmPlan, ctx: Context) -> AlgorithmPlanApplyResult:
+    """Idempotently create/update draft problems, test cases, and templates; never deletes."""
+    return await apply_algorithm_plan_impl(await _client(ctx), plan)
 
 
 @mcp.custom_route("/health", methods=["GET"])
