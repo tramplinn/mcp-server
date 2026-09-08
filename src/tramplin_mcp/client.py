@@ -71,26 +71,14 @@ class TramplinClient:
 
     async def list_courses(self) -> list[dict[str, Any]]:
         result = await self.request("GET", "/authoring/courses")
-        if isinstance(result, dict) and isinstance(result.get("items"), list):
-            result = result["items"]
-        if not isinstance(result, list):
-            raise TramplinApiError(0, "invalid_response", "Expected a course list")
-        return cast(list[dict[str, Any]], result)
+        return _list(result, "course")
 
     async def apply_course_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         result = await self.request("POST", "/authoring/course-plans/apply", json=payload)
         return _object(result, "course plan result")
 
     async def get_course(self, slug: str) -> dict[str, Any] | None:
-        try:
-            result = await self.request("GET", f"/authoring/courses/{slug}")
-        except TramplinApiError as exc:
-            if exc.status_code == 404:
-                return None
-            raise
-        if not isinstance(result, dict):
-            raise TramplinApiError(0, "invalid_response", "Expected a course object")
-        return result
+        return await self._get_or_none(f"/authoring/courses/{slug}", "course")
 
     async def get_lesson(self, lesson_id: str) -> dict[str, Any]:
         result = await self.request("GET", f"/authoring/lessons/{lesson_id}")
@@ -106,8 +94,46 @@ class TramplinClient:
         result = await self.request("GET", f"/authoring/quizzes/{quiz_id}")
         return _object(result, "quiz")
 
+    async def list_tracks(self) -> list[dict[str, Any]]:
+        result = await self.request("GET", "/authoring/tracks")
+        return _list(result, "track")
+
+    async def get_track(self, slug: str) -> dict[str, Any] | None:
+        return await self._get_or_none(f"/authoring/tracks/{slug}", "track")
+
+    async def create_track(self, payload: dict[str, Any]) -> dict[str, Any]:
+        result = await self.request("POST", "/authoring/tracks", json=payload)
+        return _object(result, "track")
+
+    async def attach_course_to_track(self, track_id: str, course_id: str) -> None:
+        await self.request("PUT", f"/authoring/tracks/{track_id}/courses/{course_id}")
+
+    async def reorder_track_courses(self, track_id: str, course_ids: list[str]) -> None:
+        await self.request(
+            "PUT",
+            f"/authoring/tracks/{track_id}/courses/order",
+            json={"course_ids": course_ids},
+        )
+
+    async def _get_or_none(self, path: str, label: str) -> dict[str, Any] | None:
+        try:
+            result = await self.request("GET", path)
+        except TramplinApiError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+        return _object(result, label)
+
 
 def _object(result: ApiResponse, label: str) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise TramplinApiError(0, "invalid_response", f"Expected a {label} object")
     return result
+
+
+def _list(result: ApiResponse, label: str) -> list[dict[str, Any]]:
+    if isinstance(result, dict) and isinstance(result.get("items"), list):
+        result = result["items"]
+    if not isinstance(result, list):
+        raise TramplinApiError(0, "invalid_response", f"Expected a {label} list")
+    return cast(list[dict[str, Any]], result)

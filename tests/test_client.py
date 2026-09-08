@@ -111,6 +111,52 @@ async def test_list_courses_unwraps_paginated_envelope() -> None:
     assert await make_client(handler).list_courses() == [{"slug": "a"}, {"slug": "b"}]
 
 
+async def test_list_tracks_unwraps_paginated_envelope() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"items": [{"slug": "seti"}], "total": 1, "limit": 20, "offset": 0},
+        )
+
+    assert await make_client(handler).list_tracks() == [{"slug": "seti"}]
+
+
+async def test_get_track_returns_none_on_404() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"code": "not_found", "message": "нет"})
+
+    assert await make_client(handler).get_track("missing") is None
+
+
+async def test_create_track_posts_payload_and_returns_object() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/authoring/tracks"
+        return httpx.Response(201, json={"id": "t1", "slug": "seti"})
+
+    result = await make_client(handler).create_track({"title": "Сети", "slug": "seti"})
+    assert result == {"id": "t1", "slug": "seti"}
+
+
+async def test_attach_course_to_track_puts_to_expected_path() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PUT"
+        assert request.url.path == "/authoring/tracks/t1/courses/c1"
+        return httpx.Response(204)
+
+    await make_client(handler).attach_course_to_track("t1", "c1")
+
+
+async def test_reorder_track_courses_puts_ordered_ids() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PUT"
+        assert request.url.path == "/authoring/tracks/t1/courses/order"
+        assert request.content == b'{"course_ids":["c2","c1"]}'
+        return httpx.Response(204)
+
+    await make_client(handler).reorder_track_courses("t1", ["c2", "c1"])
+
+
 async def test_with_token_shares_http_client_but_not_ownership() -> None:
     seen_tokens = []
 

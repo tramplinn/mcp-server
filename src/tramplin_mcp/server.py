@@ -34,7 +34,9 @@ mcp = FastMCP(
     instructions=(
         "Use inspect_course before editing existing material. Use preview_course_plan before "
         "apply_course_plan. Plans only create or update drafts and never delete content. Never "
-        "claim that content was published: this server has no publishing tool."
+        "claim that content was published: this server has no publishing tool. Tracks group "
+        "existing courses: use inspect_track before create_track/attach_course_to_track, and "
+        "attach_course_to_track (not a course plan) to add a course to a track."
     ),
     lifespan=app_lifespan,
     auth=auth,
@@ -105,6 +107,50 @@ async def validate_course_plan(plan: CoursePlan, ctx: Context) -> CoursePlanVali
 async def apply_course_plan(plan: CoursePlan, ctx: Context) -> ApplyResult:
     """Idempotently create/update a draft course, modules, and lessons; never delete or publish."""
     return await apply_plan(await _client(ctx), plan)
+
+
+@mcp.tool
+async def list_tracks(ctx: Context) -> list[dict[str, Any]]:
+    """List all tracks visible to the authenticated teacher, including drafts."""
+    return await (await _client(ctx)).list_tracks()
+
+
+@mcp.tool
+async def inspect_track(slug: str, ctx: Context) -> dict[str, Any]:
+    """Read one track, including its attached courses, before proposing changes."""
+    track = await (await _client(ctx)).get_track(slug)
+    if track is None:
+        return {"found": False, "slug": slug}
+    return {"found": True, "track": track}
+
+
+@mcp.tool
+async def create_track(
+    title: str,
+    slug: str,
+    ctx: Context,
+    description: str | None = None,
+    color: str | None = None,
+) -> dict[str, Any]:
+    """Create a draft track (without courses). Use attach_course_to_track to add courses to it."""
+    payload = {"title": title, "slug": slug, "description": description, "color": color}
+    return await (await _client(ctx)).create_track(payload)
+
+
+@mcp.tool
+async def attach_course_to_track(track_id: str, course_id: str, ctx: Context) -> dict[str, bool]:
+    """Attach an existing course to an existing track. Idempotent; never removes courses."""
+    await (await _client(ctx)).attach_course_to_track(track_id, course_id)
+    return {"attached": True}
+
+
+@mcp.tool
+async def reorder_track_courses(
+    track_id: str, course_ids: list[str], ctx: Context
+) -> dict[str, bool]:
+    """Set the display order of a track's courses; the list must include every attached course."""
+    await (await _client(ctx)).reorder_track_courses(track_id, course_ids)
+    return {"reordered": True}
 
 
 @mcp.custom_route("/health", methods=["GET"])
