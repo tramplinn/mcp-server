@@ -71,6 +71,8 @@ class TramplinClient:
 
     async def list_courses(self) -> list[dict[str, Any]]:
         result = await self.request("GET", "/authoring/courses")
+        if isinstance(result, dict) and isinstance(result.get("items"), list):
+            result = result["items"]
         if not isinstance(result, list):
             raise TramplinApiError(0, "invalid_response", "Expected a course list")
         return cast(list[dict[str, Any]], result)

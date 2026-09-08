@@ -101,6 +101,16 @@ async def test_list_courses_rejects_non_list_response() -> None:
         await make_client(handler).list_courses()
 
 
+async def test_list_courses_unwraps_paginated_envelope() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"items": [{"slug": "a"}, {"slug": "b"}], "total": 2, "limit": 20, "offset": 0},
+        )
+
+    assert await make_client(handler).list_courses() == [{"slug": "a"}, {"slug": "b"}]
+
+
 async def test_with_token_shares_http_client_but_not_ownership() -> None:
     seen_tokens = []
 
