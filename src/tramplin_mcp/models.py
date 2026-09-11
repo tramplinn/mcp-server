@@ -31,7 +31,7 @@ class LessonPlan(McpModel):
 class PlainOption(McpModel):
     """A choice offered to the student in a single/multiple-choice question."""
 
-    id: str = Field(description="Stable id for this choice; referenced from `answer`.")
+    value: str = Field(description="Stable value for this choice; referenced from `answer`.")
     label: str = Field(min_length=1, description="Text of this choice, shown to the student.")
 
 
@@ -58,11 +58,11 @@ class GroupingOption(McpModel):
 
 
 class SingleAnswer(McpModel):
-    value: str = Field(description="id (from `options`) of the one correct choice.")
+    value: str = Field(description="value (from `options`) of the one correct choice.")
 
 
 class MultipleAnswer(McpModel):
-    values: list[str] = Field(description="ids (from `options`) of every correct choice.")
+    values: list[str] = Field(description="values (from `options`) of every correct choice.")
 
 
 class TextAnswer(McpModel):
