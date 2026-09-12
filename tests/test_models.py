@@ -84,6 +84,30 @@ def test_module_content_order_accepts_matching_slugs() -> None:
     assert module.content_order == ["check", "intro"]
 
 
+def test_module_rejects_duplicate_practice_set_titles() -> None:
+    with pytest.raises(ValidationError, match="title"):
+        ModulePlan.model_validate(
+            {
+                "title": "M",
+                "slug": "m",
+                "practice_sets": [{"title": "Warmup"}, {"title": "Warmup"}],
+            }
+        )
+
+
+def test_module_content_order_accepts_practice_set_titles() -> None:
+    module = ModulePlan.model_validate(
+        {
+            "title": "M",
+            "slug": "m",
+            "lessons": [{"title": "A", "slug": "intro"}],
+            "practice_sets": [{"title": "Warmup", "problem_slugs": ["two-sum"]}],
+            "content_order": ["Warmup", "intro"],
+        }
+    )
+    assert module.content_order == ["Warmup", "intro"]
+
+
 def test_course_rejects_duplicate_module_slugs() -> None:
     with pytest.raises(ValidationError, match="module slug"):
         CoursePlan.model_validate(

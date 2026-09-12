@@ -9,10 +9,15 @@ from tramplin_mcp.models import CoursePlan
 
 
 class StubClient:
-    def __init__(self, current: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        current: dict[str, Any] | None = None,
+        problems: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
         self.current = current
         self.applied_payloads: list[dict[str, Any]] = []
         self.previewed_markdown: list[str] = []
+        self._problems = problems or {}
 
     async def get_course(self, slug: str) -> dict[str, Any] | None:
         return self.current if self.current and self.current["slug"] == slug else None
@@ -24,6 +29,9 @@ class StubClient:
     async def apply_course_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.applied_payloads.append(payload)
         return {"course_id": "1", "course_slug": payload["slug"]}
+
+    async def get_problem_by_slug(self, slug: str) -> dict[str, Any] | None:
+        return self._problems.get(slug)
 
 
 def valid_plan() -> CoursePlan:
@@ -121,6 +129,62 @@ async def test_validate_plan_flags_quiz_without_questions_as_warning() -> None:
     result = await planner.validate_plan(StubClient(), plan)
     assert result.valid is True
     assert result.issues[0].severity == "warning"
+
+
+async def test_validate_plan_flags_empty_practice_set_as_warning() -> None:
+    plan = CoursePlan.model_validate(
+        {
+            "title": "C",
+            "slug": "c",
+            "modules": [
+                {"title": "M", "slug": "m", "practice_sets": [{"title": "Warmup"}]},
+            ],
+        }
+    )
+    result = await planner.validate_plan(StubClient(), plan)
+    assert result.valid is True
+    assert result.issues[0].severity == "warning"
+    assert "практики" in result.issues[0].message
+
+
+async def test_validate_plan_flags_unknown_problem_slug_as_error() -> None:
+    plan = CoursePlan.model_validate(
+        {
+            "title": "C",
+            "slug": "c",
+            "modules": [
+                {
+                    "title": "M",
+                    "slug": "m",
+                    "practice_sets": [{"title": "Warmup", "problem_slugs": ["missing"]}],
+                },
+            ],
+        }
+    )
+    result = await planner.validate_plan(StubClient(), plan)
+    assert result.valid is False
+    assert result.issues[0].severity == "error"
+    assert "missing" in result.issues[0].message
+
+
+async def test_validate_plan_accepts_known_problem_slug() -> None:
+    plan = CoursePlan.model_validate(
+        {
+            "title": "C",
+            "slug": "c",
+            "modules": [
+                {
+                    "title": "M",
+                    "slug": "m",
+                    "practice_sets": [{"title": "Warmup", "problem_slugs": ["two-sum"]}],
+                },
+            ],
+        }
+    )
+    client = StubClient(problems={"two-sum": {"id": "problem-1"}})
+    result = await planner.validate_plan(client, plan)
+    assert result.valid is True
+    assert result.issues == []
 
 
 async def test_validate_plan_previews_non_empty_lesson_markdown() -> None:

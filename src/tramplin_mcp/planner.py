@@ -37,6 +37,23 @@ async def validate_plan(client: TramplinClient, plan: CoursePlan) -> CoursePlanV
                 issues.append(
                     ValidationIssue(severity="warning", path=path, message="Тест без вопросов")
                 )
+        for practice in module.practice_sets:
+            path = f"{plan.slug}/{module.slug}/practice/{practice.title}"
+            if not practice.problem_slugs:
+                issues.append(
+                    ValidationIssue(
+                        severity="warning", path=path, message="Набор практики без задач"
+                    )
+                )
+            for slug in practice.problem_slugs:
+                if await client.get_problem_by_slug(slug) is None:
+                    issues.append(
+                        ValidationIssue(
+                            severity="error",
+                            path=path,
+                            message=f"problem_slugs ссылается на несуществующую задачу '{slug}'",
+                        )
+                    )
     return CoursePlanValidation(
         valid=not any(issue.severity == "error" for issue in issues), issues=issues
     )

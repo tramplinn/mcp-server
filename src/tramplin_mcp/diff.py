@@ -7,13 +7,21 @@ from typing import Any
 from pydantic import BaseModel
 
 from tramplin_mcp.client import TramplinClient
-from tramplin_mcp.models import Change, ChangeKind, CoursePlan, ModulePlan, QuizPlan
+from tramplin_mcp.models import (
+    Change,
+    ChangeKind,
+    CoursePlan,
+    ModulePlan,
+    PracticeSetPlan,
+    QuizPlan,
+)
 
 COURSE_FIELDS = ("title", "summary", "color", "est_hours")
 MODULE_FIELDS = ("title", "summary")
 LESSON_FIELDS = ("title", "body_md", "est_minutes")
 QUIZ_FIELDS = ("title", "lesson_id")
 QUESTION_FIELDS = ("position", "prompt_md", "type", "options", "answer", "explain_md")
+PRACTICE_FIELDS = ("title", "description", "mode", "duration_minutes")
 
 
 async def changes_for(
@@ -74,7 +82,52 @@ async def changes_for(
                         str(existing["id"]),
                     )
                 )
+        practice_sets = await _practice_index(client, module)
+        for practice_plan in module_plan.practice_sets:
+            path = f"{module_path}/practice/{practice_plan.title}"
+            practice = practice_sets.get(practice_plan.title)
+            if practice is None:
+                changes.append(Change(action="create", kind="practice", path=path))
+                continue
+            changes.append(await _diff_practice_set(client, path, practice_plan, practice))
     return changes
+
+
+async def _diff_practice_set(
+    client: TramplinClient,
+    path: str,
+    plan: PracticeSetPlan,
+    current: dict[str, Any],
+) -> Change:
+    desired = {
+        "title": plan.title,
+        "description": plan.description,
+        "mode": plan.mode,
+        "duration_minutes": plan.duration_minutes,
+    }
+    change = _diff("practice", path, desired, current, PRACTICE_FIELDS, str(current["id"]))
+    existing_problem_ids = {str(item["problem_id"]) for item in current.get("problems", [])}
+    desired_problem_ids: set[str] = set()
+    for slug in plan.problem_slugs:
+        problem = await client.get_problem_by_slug(slug)
+        if problem is not None:
+            desired_problem_ids.add(str(problem["id"]))
+    if desired_problem_ids - existing_problem_ids:
+        change.action = "update"
+        if "problem_slugs" not in change.fields:
+            change.fields.append("problem_slugs")
+    return change
+
+
+async def _practice_index(
+    client: TramplinClient, module: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    for item in module.get("items", []):
+        if item.get("kind") == "practice":
+            practice = await client.get_practice_set(str(item["practice_set"]["id"]))
+            result[str(practice["title"])] = practice
+    return result
 
 
 async def _lesson_index(
@@ -114,6 +167,10 @@ def _module_create_changes(path: str, plan: ModulePlan) -> list[Change]:
     )
     for quiz in plan.quizzes:
         changes.extend(_quiz_create_changes(f"{path}/{quiz.slug}", quiz))
+    changes.extend(
+        Change(action="create", kind="practice", path=f"{path}/practice/{practice.title}")
+        for practice in plan.practice_sets
+    )
     return changes
 
 

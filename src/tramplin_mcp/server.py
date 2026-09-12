@@ -56,7 +56,10 @@ mcp = FastMCP(
         "existing courses: use inspect_track before create_track/attach_course_to_track, and "
         "attach_course_to_track (not a course plan) to add a course to a track. Problems are a "
         "flat bank: use preview_algorithm_plan before apply_algorithm_plan; it never runs "
-        "validate_template, so a plan applying cleanly does not mean solutions pass their tests."
+        "validate_template, so a plan applying cleanly does not mean solutions pass their tests. "
+        "A module's practice_sets create or update practice sets in that module, referencing bank "
+        "problems by slug; a practice set has no slug of its own, so it is matched by title — "
+        "keep titles stable across applies to update the same set instead of creating a new one."
     ),
     lifespan=app_lifespan,
     auth=auth,

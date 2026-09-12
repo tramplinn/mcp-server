@@ -94,6 +94,10 @@ class TramplinClient:
         result = await self.request("GET", f"/authoring/quizzes/{quiz_id}")
         return _object(result, "quiz")
 
+    async def get_practice_set(self, set_id: str) -> dict[str, Any]:
+        result = await self.request("GET", f"/authoring/practice-sets/{set_id}")
+        return _object(result, "practice set")
+
     async def list_tracks(self) -> list[dict[str, Any]]:
         result = await self.request("GET", "/authoring/tracks")
         return _list(result, "track")

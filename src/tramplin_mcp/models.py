@@ -194,6 +194,36 @@ class QuizPlan(McpModel):
         return self
 
 
+class PracticeSetPlan(McpModel):
+    """The desired state of one practice set (a curated list of algorithm-bank problems)
+    within a module. Practice sets have no slug in Tramplin, so `title` is the matching
+    key across applies — keep it stable to update the same set instead of creating a new one."""
+
+    title: str = Field(
+        min_length=1, max_length=200, description="Practice set title shown to students."
+    )
+    description: str = Field(
+        default="", description="Short description shown above the practice set."
+    )
+    mode: Literal["practice", "mock_interview"] = Field(
+        default="practice",
+        description="'practice' for open practice; 'mock_interview' for a timed simulation.",
+    )
+    duration_minutes: int | None = Field(
+        default=None,
+        ge=1,
+        le=480,
+        description="Time limit in minutes; required once a mock_interview set is published.",
+    )
+    problem_slugs: list[Slug] = Field(
+        default_factory=list,
+        description=(
+            "Slugs of problems from the algorithm bank (see list_problems/apply_algorithm_plan), "
+            "in the order they should appear. Problems already in the set but absent here are kept."
+        ),
+    )
+
+
 class ModulePlan(McpModel):
     title: str = Field(min_length=1, max_length=200, description="Module title shown to students.")
     slug: Slug = Field(pattern=SLUG_PATTERN, max_length=120, description=_SLUG_DOC)
@@ -204,11 +234,15 @@ class ModulePlan(McpModel):
     quizzes: list[QuizPlan] = Field(
         default_factory=list, description="Quizzes to create or update."
     )
-    content_order: list[Slug] = Field(
+    practice_sets: list[PracticeSetPlan] = Field(
+        default_factory=list, description="Practice sets to create or update."
+    )
+    content_order: list[str] = Field(
         default_factory=list,
         description=(
-            "Lesson and quiz slugs from this module, in the order they should appear. Must "
-            "list every slug exactly once; leave empty to keep the order given above."
+            "Lesson slugs, quiz slugs, and practice set titles from this module, in the order "
+            "they should appear. Must list every one exactly once; leave empty to keep the "
+            "order given above."
         ),
     )
 
@@ -216,11 +250,19 @@ class ModulePlan(McpModel):
     def unique_lesson_slugs(self) -> Self:
         _ensure_unique([lesson.slug for lesson in self.lessons], "lesson slug")
         _ensure_unique([quiz.slug for quiz in self.quizzes], "quiz slug")
-        all_slugs = [lesson.slug for lesson in self.lessons] + [quiz.slug for quiz in self.quizzes]
+        _ensure_unique([practice.title for practice in self.practice_sets], "practice set title")
+        all_slugs = (
+            [lesson.slug for lesson in self.lessons]
+            + [quiz.slug for quiz in self.quizzes]
+            + [practice.title for practice in self.practice_sets]
+        )
         if self.content_order and (
             set(self.content_order) != set(all_slugs) or len(self.content_order) != len(all_slugs)
         ):
-            raise ValueError("content_order must contain every lesson and quiz slug exactly once")
+            raise ValueError(
+                "content_order must contain every lesson/quiz slug and practice set title "
+                "exactly once"
+            )
         return self
 
 
@@ -260,6 +302,7 @@ ChangeKind = Literal[
     "quiz",
     "question",
     "order",
+    "practice",
     "problem",
     "test_case",
     "template",

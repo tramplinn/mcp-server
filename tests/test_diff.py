@@ -11,15 +11,25 @@ class StubClient:
         self,
         lessons: dict[str, dict[str, Any]] | None = None,
         quizzes: dict[str, dict[str, Any]] | None = None,
+        practice_sets: dict[str, dict[str, Any]] | None = None,
+        problems: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self._lessons = lessons or {}
         self._quizzes = quizzes or {}
+        self._practice_sets = practice_sets or {}
+        self._problems = problems or {}
 
     async def get_lesson(self, lesson_id: str) -> dict[str, Any]:
         return self._lessons[lesson_id]
 
     async def get_quiz(self, quiz_id: str) -> dict[str, Any]:
         return self._quizzes[quiz_id]
+
+    async def get_practice_set(self, set_id: str) -> dict[str, Any]:
+        return self._practice_sets[set_id]
+
+    async def get_problem_by_slug(self, slug: str) -> dict[str, Any] | None:
+        return self._problems.get(slug)
 
 
 def plan(**overrides: Any) -> CoursePlan:
@@ -152,3 +162,134 @@ async def test_new_module_on_existing_course_is_a_create() -> None:
     }
     changes = await changes_for(StubClient(), plan(), current)
     assert [c.action for c in changes] == ["unchanged", "create", "create"]
+
+
+async def test_new_practice_set_on_existing_module_is_a_create() -> None:
+    current = {
+        "id": "course-1",
+        "title": "Python",
+        "summary": None,
+        "color": None,
+        "est_hours": None,
+        "modules": [
+            {
+                "id": "module-1",
+                "slug": "basics",
+                "title": "Basics",
+                "summary": None,
+                "position": 0,
+                "items": [],
+            }
+        ],
+    }
+    course_plan = plan(
+        modules=[
+            {
+                "title": "Basics",
+                "slug": "basics",
+                "practice_sets": [{"title": "Warmup", "problem_slugs": ["two-sum"]}],
+            }
+        ]
+    )
+    changes = await changes_for(StubClient(), course_plan, current)
+    practice_change = next(c for c in changes if c.kind == "practice")
+    assert practice_change.action == "create"
+
+
+async def test_identical_practice_set_is_unchanged() -> None:
+    current = {
+        "id": "course-1",
+        "title": "Python",
+        "summary": None,
+        "color": None,
+        "est_hours": None,
+        "modules": [
+            {
+                "id": "module-1",
+                "slug": "basics",
+                "title": "Basics",
+                "summary": None,
+                "position": 0,
+                "items": [
+                    {
+                        "kind": "practice",
+                        "practice_set": {"id": "set-1", "title": "Warmup"},
+                    }
+                ],
+            }
+        ],
+    }
+    practice_sets = {
+        "set-1": {
+            "id": "set-1",
+            "title": "Warmup",
+            "description": "",
+            "mode": "practice",
+            "duration_minutes": None,
+            "problems": [{"problem_id": "problem-1"}],
+        }
+    }
+    problems = {"two-sum": {"id": "problem-1"}}
+    course_plan = plan(
+        modules=[
+            {
+                "title": "Basics",
+                "slug": "basics",
+                "practice_sets": [{"title": "Warmup", "problem_slugs": ["two-sum"]}],
+            }
+        ]
+    )
+    client = StubClient(practice_sets=practice_sets, problems=problems)
+    changes = await changes_for(client, course_plan, current)
+    practice_change = next(c for c in changes if c.kind == "practice")
+    assert practice_change.action == "unchanged"
+
+
+async def test_detects_new_problem_added_to_existing_practice_set() -> None:
+    current = {
+        "id": "course-1",
+        "title": "Python",
+        "summary": None,
+        "color": None,
+        "est_hours": None,
+        "modules": [
+            {
+                "id": "module-1",
+                "slug": "basics",
+                "title": "Basics",
+                "summary": None,
+                "position": 0,
+                "items": [
+                    {
+                        "kind": "practice",
+                        "practice_set": {"id": "set-1", "title": "Warmup"},
+                    }
+                ],
+            }
+        ],
+    }
+    practice_sets = {
+        "set-1": {
+            "id": "set-1",
+            "title": "Warmup",
+            "description": "",
+            "mode": "practice",
+            "duration_minutes": None,
+            "problems": [],
+        }
+    }
+    problems = {"two-sum": {"id": "problem-1"}}
+    course_plan = plan(
+        modules=[
+            {
+                "title": "Basics",
+                "slug": "basics",
+                "practice_sets": [{"title": "Warmup", "problem_slugs": ["two-sum"]}],
+            }
+        ]
+    )
+    client = StubClient(practice_sets=practice_sets, problems=problems)
+    changes = await changes_for(client, course_plan, current)
+    practice_change = next(c for c in changes if c.kind == "practice")
+    assert practice_change.action == "update"
+    assert practice_change.fields == ["problem_slugs"]
