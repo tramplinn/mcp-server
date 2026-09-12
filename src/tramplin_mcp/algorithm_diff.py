@@ -1,11 +1,9 @@
-"""Computes the create/update/unchanged diff between an AlgorithmPlan and Tramplin's state."""
-
 from __future__ import annotations
 
 from typing import Any
 
 from tramplin_mcp.client import TramplinClient
-from tramplin_mcp.diff import _diff, _plain
+from tramplin_mcp.entity_diff import diff_fields, to_plain
 from tramplin_mcp.models import AlgorithmPlan, Change, ProblemPlan
 
 PROBLEM_FIELDS = (
@@ -37,7 +35,7 @@ async def changes_for(client: TramplinClient, plan: AlgorithmPlan) -> list[Chang
             changes.append(
                 Change(action="create", kind="test_case", path=path)
                 if case is None
-                else _diff("test_case", path, case_plan, case, CASE_FIELDS, str(case["id"]))
+                else diff_fields("test_case", path, case_plan, case, CASE_FIELDS, str(case["id"]))
             )
         existing_templates = {t["language"]: t for t in current.get("templates", [])}
         for template_plan in problem_plan.templates:
@@ -46,7 +44,7 @@ async def changes_for(client: TramplinClient, plan: AlgorithmPlan) -> list[Chang
             changes.append(
                 Change(action="create", kind="template", path=path)
                 if template is None
-                else _diff(
+                else diff_fields(
                     "template",
                     path,
                     template_plan,
@@ -59,9 +57,8 @@ async def changes_for(client: TramplinClient, plan: AlgorithmPlan) -> list[Chang
 
 
 def _problem_diff(path: str, desired: ProblemPlan, current: dict[str, Any]) -> Change:
-    """Tags need their own comparison: the plan lists names, the API returns {id, name} objects."""
     changed = [
-        field for field in PROBLEM_FIELDS if _plain(getattr(desired, field)) != current.get(field)
+        field for field in PROBLEM_FIELDS if to_plain(getattr(desired, field)) != current.get(field)
     ]
     current_tags = sorted(tag["name"] for tag in current.get("tags", []))
     if sorted(desired.tags) != current_tags:

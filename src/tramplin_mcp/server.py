@@ -99,8 +99,6 @@ async def inspect_lesson(lesson_id: str, ctx: Context) -> dict[str, Any]:
 
 
 def _omit_body_html(value: object) -> object:
-    """body_html is fully derived from body_md and roughly doubles lesson payload size for no
-    new information; authoring only needs body_md. Use preview_markdown to see the rendered HTML."""
     if isinstance(value, dict):
         return {key: _omit_body_html(item) for key, item in value.items() if key != "body_html"}
     if isinstance(value, list):

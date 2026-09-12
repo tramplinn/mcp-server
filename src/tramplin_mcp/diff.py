@@ -1,15 +1,11 @@
-"""Computes the create/update/unchanged diff between a CoursePlan and Tramplin's current state."""
-
 from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
-
 from tramplin_mcp.client import TramplinClient
+from tramplin_mcp.entity_diff import diff_fields
 from tramplin_mcp.models import (
     Change,
-    ChangeKind,
     CoursePlan,
     ModulePlan,
     PracticeSetPlan,
@@ -29,7 +25,7 @@ async def changes_for(
 ) -> list[Change]:
     if current is None:
         return _all_create_changes(plan)
-    changes = [_diff("course", plan.slug, plan, current, COURSE_FIELDS, str(current["id"]))]
+    changes = [diff_fields("course", plan.slug, plan, current, COURSE_FIELDS, str(current["id"]))]
     modules = {item["slug"]: item for item in current.get("modules", [])}
     for position, module_plan in enumerate(plan.modules):
         module_path = f"{plan.slug}/{module_plan.slug}"
@@ -37,7 +33,7 @@ async def changes_for(
         if module is None:
             changes.extend(_module_create_changes(module_path, module_plan))
             continue
-        module_change = _diff(
+        module_change = diff_fields(
             "module", module_path, module_plan, module, MODULE_FIELDS, str(module["id"])
         )
         if module.get("position") != position:
@@ -51,7 +47,9 @@ async def changes_for(
             changes.append(
                 Change(action="create", kind="lesson", path=path)
                 if lesson is None
-                else _diff("lesson", path, lesson_plan, lesson, LESSON_FIELDS, str(lesson["id"]))
+                else diff_fields(
+                    "lesson", path, lesson_plan, lesson, LESSON_FIELDS, str(lesson["id"])
+                )
             )
         quizzes = await _quiz_index(client, module)
         lesson_ids = {slug: str(item["id"]) for slug, item in lessons.items()}
@@ -65,7 +63,7 @@ async def changes_for(
                 "title": quiz_plan.title,
                 "lesson_id": lesson_ids.get(quiz_plan.lesson_slug or ""),
             }
-            changes.append(_diff("quiz", path, desired, quiz, QUIZ_FIELDS, str(quiz["id"])))
+            changes.append(diff_fields("quiz", path, desired, quiz, QUIZ_FIELDS, str(quiz["id"])))
             questions = {question["position"]: question for question in quiz.get("questions", [])}
             for question in quiz_plan.questions:
                 question_path = f"{path}/questions/{question.position}"
@@ -73,7 +71,7 @@ async def changes_for(
                 changes.append(
                     Change(action="create", kind="question", path=question_path)
                     if existing is None
-                    else _diff(
+                    else diff_fields(
                         "question",
                         question_path,
                         question,
@@ -105,7 +103,7 @@ async def _diff_practice_set(
         "mode": plan.mode,
         "duration_minutes": plan.duration_minutes,
     }
-    change = _diff("practice", path, desired, current, PRACTICE_FIELDS, str(current["id"]))
+    change = diff_fields("practice", path, desired, current, PRACTICE_FIELDS, str(current["id"]))
     existing_problem_ids = {str(item["problem_id"]) for item in current.get("problems", [])}
     desired_problem_ids: set[str] = set()
     for slug in plan.problem_slugs:
@@ -182,33 +180,3 @@ def _quiz_create_changes(path: str, plan: QuizPlan) -> list[Change]:
             for q in plan.questions
         ],
     ]
-
-
-def _diff(
-    kind: ChangeKind,
-    path: str,
-    desired: object,
-    current: dict[str, Any],
-    fields: tuple[str, ...],
-    entity_id: str,
-) -> Change:
-    lookup = desired.get if isinstance(desired, dict) else lambda field: getattr(desired, field)
-    changed = [field for field in fields if _plain(lookup(field)) != current.get(field)]
-    return Change(
-        action="update" if changed else "unchanged",
-        kind=kind,
-        path=path,
-        entity_id=entity_id,
-        fields=changed,
-    )
-
-
-def _plain(value: object) -> object:
-    """`desired` values from a CoursePlan are typed models; `current` comes from the API as
-    plain JSON. Question `answer`/`options` in particular are now per-type pydantic models
-    (see QuestionPlan), so they need dumping before they can be compared to the API's dicts."""
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, list):
-        return [_plain(item) for item in value]
-    return value

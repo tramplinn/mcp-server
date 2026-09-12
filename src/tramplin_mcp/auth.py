@@ -1,6 +1,3 @@
-"""OAuth wiring for the HTTP transport: Tramplin acts as its own OAuth provider, proxied
-through FastMCP's OAuthProxy so MCP clients get standard Dynamic Client Registration."""
-
 from __future__ import annotations
 
 import httpx
