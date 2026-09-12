@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from tramplin_mcp import planner
-from tramplin_mcp.models import CoursePlan
+from tramplin_mcp.models import CoursePlan, PracticeSetPlan
 
 
 class StubClient:
@@ -248,3 +248,86 @@ async def test_apply_plan_on_existing_course_warns_about_additive_semantics() ->
     client = StubClient(current={"id": "1", "slug": "python", "modules": []})
     result = await planner.apply_plan(client, valid_plan())
     assert result.warnings
+
+
+def existing_course() -> dict[str, Any]:
+    return {
+        "id": "1",
+        "slug": "python",
+        "title": "Python",
+        "summary": "From zero to hero",
+        "color": "#3572a5",
+        "est_hours": 10,
+        "modules": [
+            {
+                "id": "m1",
+                "slug": "basics",
+                "title": "Basics",
+                "summary": "Module summary",
+                "position": 0,
+                "items": [],
+            }
+        ],
+    }
+
+
+async def test_apply_practice_set_raises_when_course_missing() -> None:
+    client = StubClient()
+    with pytest.raises(ValueError, match="not found"):
+        await planner.apply_practice_set(client, "python", "basics", PracticeSetPlan(title="W"))
+
+
+async def test_apply_practice_set_raises_when_module_missing() -> None:
+    client = StubClient(current=existing_course())
+    with pytest.raises(ValueError, match="not found"):
+        await planner.apply_practice_set(client, "python", "missing", PracticeSetPlan(title="W"))
+
+
+async def test_apply_practice_set_preserves_course_and_module_fields() -> None:
+    client = StubClient(current=existing_course())
+    practice_set = PracticeSetPlan(title="Warmup", problem_slugs=["two-sum"])
+    client._problems = {"two-sum": {"id": "problem-1"}}
+    result = await planner.apply_practice_set(client, "python", "basics", practice_set)
+    assert result.completed is True
+    [payload] = client.applied_payloads
+    assert payload["title"] == "Python"
+    assert payload["summary"] == "From zero to hero"
+    assert payload["color"] == "#3572a5"
+    assert payload["est_hours"] == 10
+    [module_payload] = payload["modules"]
+    assert module_payload["slug"] == "basics"
+    assert module_payload["title"] == "Basics"
+    assert module_payload["summary"] == "Module summary"
+    assert module_payload["lessons"] == []
+    assert module_payload["quizzes"] == []
+    [practice_payload] = module_payload["practice_sets"]
+    assert practice_payload["title"] == "Warmup"
+    assert practice_payload["problem_slugs"] == ["two-sum"]
+
+
+async def test_preview_practice_set_reports_update_for_existing_set() -> None:
+    course = existing_course()
+    course["modules"][0]["items"] = [
+        {
+            "kind": "practice",
+            "practice_set": {"id": "set-1", "title": "Warmup"},
+        }
+    ]
+    client = StubClient(current=course)
+
+    async def get_practice_set(set_id: str) -> dict[str, Any]:
+        return {
+            "id": "set-1",
+            "title": "Warmup",
+            "description": "",
+            "mode": "practice",
+            "duration_minutes": None,
+            "problems": [],
+        }
+
+    client.get_practice_set = get_practice_set  # type: ignore[method-assign]
+    preview = await planner.preview_practice_set(
+        client, "python", "basics", PracticeSetPlan(title="Warmup", description="Updated")
+    )
+    assert preview.updates == 1
+    assert preview.creates == 0

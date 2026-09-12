@@ -9,6 +9,8 @@ from tramplin_mcp.models import (
     CoursePlan,
     CoursePlanPreview,
     CoursePlanValidation,
+    ModulePlan,
+    PracticeSetPlan,
     ValidationIssue,
 )
 
@@ -91,3 +93,50 @@ async def apply_plan(client: TramplinClient, plan: CoursePlan) -> ApplyResult:
 
 def _warnings(current: dict[str, Any] | None) -> list[str]:
     return [] if current is None else ["Additive-only: сущности вне плана сохраняются в конце."]
+
+
+async def _course_plan_for_practice_set(
+    client: TramplinClient, course_slug: str, module_slug: str, practice_set: PracticeSetPlan
+) -> CoursePlan:
+    course = await client.get_course(course_slug)
+    if course is None:
+        raise ValueError(f"Course '{course_slug}' not found")
+    module = next((m for m in course.get("modules", []) if m["slug"] == module_slug), None)
+    if module is None:
+        raise ValueError(f"Module '{module_slug}' not found in course '{course_slug}'")
+    return CoursePlan(
+        title=course["title"],
+        slug=course_slug,
+        summary=course.get("summary"),
+        color=course.get("color"),
+        est_hours=course.get("est_hours"),
+        modules=[
+            ModulePlan(
+                title=module["title"],
+                slug=module_slug,
+                summary=module.get("summary"),
+                practice_sets=[practice_set],
+            )
+        ],
+    )
+
+
+async def preview_practice_set(
+    client: TramplinClient, course_slug: str, module_slug: str, practice_set: PracticeSetPlan
+) -> CoursePlanPreview:
+    plan = await _course_plan_for_practice_set(client, course_slug, module_slug, practice_set)
+    return await preview_plan(client, plan)
+
+
+async def validate_practice_set(
+    client: TramplinClient, course_slug: str, module_slug: str, practice_set: PracticeSetPlan
+) -> CoursePlanValidation:
+    plan = await _course_plan_for_practice_set(client, course_slug, module_slug, practice_set)
+    return await validate_plan(client, plan)
+
+
+async def apply_practice_set(
+    client: TramplinClient, course_slug: str, module_slug: str, practice_set: PracticeSetPlan
+) -> ApplyResult:
+    plan = await _course_plan_for_practice_set(client, course_slug, module_slug, practice_set)
+    return await apply_plan(client, plan)

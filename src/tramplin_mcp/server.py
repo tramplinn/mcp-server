@@ -30,8 +30,16 @@ from tramplin_mcp.models import (
     CoursePlan,
     CoursePlanPreview,
     CoursePlanValidation,
+    PracticeSetPlan,
 )
-from tramplin_mcp.planner import apply_plan, preview_plan, validate_plan
+from tramplin_mcp.planner import (
+    apply_plan,
+    apply_practice_set,
+    preview_plan,
+    preview_practice_set,
+    validate_plan,
+    validate_practice_set,
+)
 
 settings = Settings()
 auth = build_auth(settings)
@@ -59,7 +67,10 @@ mcp = FastMCP(
         "validate_template, so a plan applying cleanly does not mean solutions pass their tests. "
         "A module's practice_sets create or update practice sets in that module, referencing bank "
         "problems by slug; a practice set has no slug of its own, so it is matched by title — "
-        "keep titles stable across applies to update the same set instead of creating a new one."
+        "keep titles stable across applies to update the same set instead of creating a new one. "
+        "To add or update a single practice set in an existing course/module without restating the "
+        "rest of the course, use preview_practice_set_plan/apply_practice_set_plan instead of a "
+        "full course plan; the course and module must already exist."
     ),
     lifespan=app_lifespan,
     auth=auth,
@@ -128,6 +139,34 @@ async def validate_course_plan(plan: CoursePlan, ctx: Context) -> CoursePlanVali
 async def apply_course_plan(plan: CoursePlan, ctx: Context) -> ApplyResult:
     """Idempotently create/update a draft course, modules, and lessons; never delete or publish."""
     return await apply_plan(await _client(ctx), plan)
+
+
+@mcp.tool
+async def preview_practice_set_plan(
+    course_slug: str, module_slug: str, practice_set: PracticeSetPlan, ctx: Context
+) -> CoursePlanPreview:
+    """Compare a desired practice set for one module with Tramplin without changing data."""
+    return await preview_practice_set(await _client(ctx), course_slug, module_slug, practice_set)
+
+
+@mcp.tool
+async def validate_practice_set_plan(
+    course_slug: str, module_slug: str, practice_set: PracticeSetPlan, ctx: Context
+) -> CoursePlanValidation:
+    """Validate a practice set's problem slugs without writes."""
+    return await validate_practice_set(await _client(ctx), course_slug, module_slug, practice_set)
+
+
+@mcp.tool
+async def apply_practice_set_plan(
+    course_slug: str, module_slug: str, practice_set: PracticeSetPlan, ctx: Context
+) -> ApplyResult:
+    """Idempotently create/update one draft practice set in an existing course module.
+
+    Matches by title; leaves the rest of the course/module untouched. The course and module
+    must already exist (create them with apply_course_plan first).
+    """
+    return await apply_practice_set(await _client(ctx), course_slug, module_slug, practice_set)
 
 
 @mcp.tool
