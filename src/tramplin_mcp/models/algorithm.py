@@ -47,7 +47,7 @@ class ProblemPlan(McpModel):
     )
     provider: Literal["internal", "external"] = Field(
         default="internal",
-        description="'internal' problems run on Judge0; 'external' just link out.",
+        description="'internal' problems run on Piston; 'external' just link out.",
     )
     external_key: str | None = Field(default=None, max_length=200)
     external_url: str | None = Field(
