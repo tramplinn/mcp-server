@@ -1,18 +1,10 @@
 from __future__ import annotations
 
-from typing import Literal, Self
+from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field
 
-from tramplin_mcp.models.common import (
-    _SLUG_DOC,
-    SLUG_PATTERN,
-    Change,
-    McpModel,
-    Slug,
-    ValidationIssue,
-    _ensure_unique,
-)
+from tramplin_mcp.models.common import _SLUG_DOC, SLUG_PATTERN, McpModel, PlanReport, Slug
 from tramplin_mcp.models.questions import QuizPlan
 
 
@@ -82,29 +74,12 @@ class ModulePlan(McpModel):
         ),
     )
 
-    @model_validator(mode="after")
-    def unique_lesson_slugs(self) -> Self:
-        _ensure_unique([lesson.slug for lesson in self.lessons], "lesson slug")
-        _ensure_unique([quiz.slug for quiz in self.quizzes], "quiz slug")
-        _ensure_unique([practice.title for practice in self.practice_sets], "practice set title")
-        all_slugs = (
-            [lesson.slug for lesson in self.lessons]
-            + [quiz.slug for quiz in self.quizzes]
-            + [practice.title for practice in self.practice_sets]
-        )
-        if self.content_order and (
-            set(self.content_order) != set(all_slugs) or len(self.content_order) != len(all_slugs)
-        ):
-            raise ValueError(
-                "content_order must contain every lesson/quiz slug and practice set title "
-                "exactly once"
-            )
-        return self
-
 
 class CoursePlan(McpModel):
-    """The complete desired state of a course. Applying a plan is idempotent and
-    additive-only: existing modules/lessons/quizzes not mentioned in the plan are kept."""
+    """The desired state of a course. Applying a plan is idempotent and additive-only:
+    existing modules/lessons/quizzes/practice sets not mentioned in the plan are kept, never
+    deleted. Every course/module/lesson/quiz that IS in the plan is saved as a draft, so a
+    published one gets unpublished (the report warns about it)."""
 
     title: str = Field(min_length=1, max_length=200, description="Course title shown to students.")
     slug: Slug = Field(
@@ -125,34 +100,12 @@ class CoursePlan(McpModel):
         default_factory=list, description="Modules to create or update, in display order."
     )
 
-    @model_validator(mode="after")
-    def unique_module_slugs(self) -> Self:
-        _ensure_unique([module.slug for module in self.modules], "module slug")
-        return self
 
-
-class CoursePlanPreview(McpModel):
+class CoursePlanReport(PlanReport):
     course_slug: str
-    changes: list[Change] = Field(
-        description="Every create/update/unchanged change the plan would make."
-    )
-    creates: int = Field(description="Number of new entities the plan would create.")
-    updates: int = Field(description="Number of existing entities the plan would modify.")
-    unchanged: int = Field(description="Number of existing entities the plan leaves untouched.")
-    warnings: list[str] = Field(
-        default_factory=list, description="Non-blocking notes about applying this plan."
-    )
+    course_id: str | None = Field(default=None, description="Set after apply.")
 
 
-class ApplyResult(McpModel):
+class PracticeSetPlanReport(PlanReport):
     course_slug: str
-    completed: bool = Field(description="Whether the plan was applied successfully.")
-    changes: list[Change] = Field(description="Every create/update/unchanged change that was made.")
-    warnings: list[str] = Field(
-        default_factory=list, description="Non-blocking notes about what was applied."
-    )
-
-
-class CoursePlanValidation(McpModel):
-    valid: bool = Field(description="True when there are no 'error'-severity issues.")
-    issues: list[ValidationIssue] = Field(default_factory=list)
+    module_slug: str

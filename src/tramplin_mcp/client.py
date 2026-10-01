@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import json
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import httpx
+from fastmcp.exceptions import ToolError
 
 type ApiResponse = dict[str, Any] | list[Any] | None
+type PlanAction = Literal["preview", "apply"]
 
 
-class TramplinApiError(RuntimeError):
+class TramplinApiError(ToolError):
+    """Shown to the agent verbatim; for invalid_plan the details carry the issues list."""
+
     def __init__(self, status_code: int, code: str, message: str, details: object = None) -> None:
         self.status_code = status_code
         self.code = code
@@ -69,20 +73,14 @@ class TramplinClient:
             payload.get("details"),
         )
 
-    async def list_courses(self) -> list[dict[str, Any]]:
-        result = await self.request("GET", "/authoring/courses")
-        return _list(result, "course")
-
-    async def apply_course_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
-        result = await self.request("POST", "/authoring/course-plans/apply", json=payload)
-        return _object(result, "course plan result")
+    async def index_courses(self) -> dict[str, Any]:
+        return _object(await self.request("GET", "/authoring/courses/index"), "course index")
 
     async def get_course(self, slug: str) -> dict[str, Any] | None:
         return await self._get_or_none(f"/authoring/courses/{slug}", "course")
 
     async def get_lesson(self, lesson_id: str) -> dict[str, Any]:
-        result = await self.request("GET", f"/authoring/lessons/{lesson_id}")
-        return _object(result, "lesson")
+        return _object(await self.request("GET", f"/authoring/lessons/{lesson_id}"), "lesson")
 
     async def preview_markdown(self, body_md: str) -> dict[str, Any]:
         result = await self.request(
@@ -90,45 +88,44 @@ class TramplinClient:
         )
         return _object(result, "Markdown preview")
 
-    async def get_quiz(self, quiz_id: str) -> dict[str, Any]:
-        result = await self.request("GET", f"/authoring/quizzes/{quiz_id}")
-        return _object(result, "quiz")
+    async def course_plan(self, action: PlanAction, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._plan(f"/authoring/course-plans/{action}", payload)
 
-    async def get_practice_set(self, set_id: str) -> dict[str, Any]:
-        result = await self.request("GET", f"/authoring/practice-sets/{set_id}")
-        return _object(result, "practice set")
+    async def practice_set_plan(
+        self, action: PlanAction, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await self._plan(f"/authoring/course-plans/practice-set/{action}", payload)
 
-    async def list_tracks(self) -> list[dict[str, Any]]:
-        result = await self.request("GET", "/authoring/tracks")
-        return _list(result, "track")
+    async def index_tracks(self) -> dict[str, Any]:
+        return _object(await self.request("GET", "/authoring/tracks/index"), "track index")
 
     async def get_track(self, slug: str) -> dict[str, Any] | None:
         return await self._get_or_none(f"/authoring/tracks/{slug}", "track")
 
-    async def create_track(self, payload: dict[str, Any]) -> dict[str, Any]:
-        result = await self.request("POST", "/authoring/tracks", json=payload)
-        return _object(result, "track")
+    async def track_plan(self, action: PlanAction, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._plan(f"/authoring/track-plans/{action}", payload)
 
-    async def attach_course_to_track(self, track_id: str, course_id: str) -> None:
-        await self.request("PUT", f"/authoring/tracks/{track_id}/courses/{course_id}")
-
-    async def reorder_track_courses(self, track_id: str, course_ids: list[str]) -> None:
-        await self.request(
-            "PUT",
-            f"/authoring/tracks/{track_id}/courses/order",
-            json={"course_ids": course_ids},
-        )
-
-    async def list_problems(self) -> list[dict[str, Any]]:
-        result = await self.request("GET", "/authoring/algorithms/problems")
-        return _list(result, "problem")
+    async def index_problems(self) -> dict[str, Any]:
+        result = await self.request("GET", "/authoring/algorithms/problems/index")
+        return _object(result, "problem index")
 
     async def get_problem_by_slug(self, slug: str) -> dict[str, Any] | None:
         return await self._get_or_none(f"/authoring/algorithms/problems/slug/{slug}", "problem")
 
-    async def apply_algorithm_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
-        result = await self.request("POST", "/authoring/algorithm-plans/apply", json=payload)
-        return _object(result, "algorithm plan result")
+    async def algorithm_plan(
+        self,
+        action: PlanAction,
+        payload: dict[str, Any],
+        *,
+        validate_templates: bool = False,
+    ) -> dict[str, Any]:
+        path = f"/authoring/algorithm-plans/{action}"
+        if validate_templates:
+            path = f"{path}?validate_templates=true"
+        return await self._plan(path, payload)
+
+    async def _plan(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return _object(await self.request("POST", path, json=payload), "plan report")
 
     async def _get_or_none(self, path: str, label: str) -> dict[str, Any] | None:
         try:
@@ -144,11 +141,3 @@ def _object(result: ApiResponse, label: str) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise TramplinApiError(0, "invalid_response", f"Expected a {label} object")
     return result
-
-
-def _list(result: ApiResponse, label: str) -> list[dict[str, Any]]:
-    if isinstance(result, dict) and isinstance(result.get("items"), list):
-        result = result["items"]
-    if not isinstance(result, list):
-        raise TramplinApiError(0, "invalid_response", f"Expected a {label} list")
-    return cast(list[dict[str, Any]], result)

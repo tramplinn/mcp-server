@@ -93,32 +93,28 @@ async def test_get_course_returns_none_on_404() -> None:
     assert await make_client(handler).get_course("missing") is None
 
 
-async def test_list_courses_rejects_non_list_response() -> None:
+async def test_index_rejects_non_object_response() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"not": "a list"})
+        return httpx.Response(200, json=[])
 
     with pytest.raises(TramplinApiError, match="invalid_response"):
-        await make_client(handler).list_courses()
+        await make_client(handler).index_courses()
 
 
-async def test_list_courses_unwraps_paginated_envelope() -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={"items": [{"slug": "a"}, {"slug": "b"}], "total": 2, "limit": 20, "offset": 0},
-        )
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("index_courses", "/authoring/courses/index"),
+        ("index_tracks", "/authoring/tracks/index"),
+        ("index_problems", "/authoring/algorithms/problems/index"),
+    ],
+)
+async def test_indexes_get_expected_paths(method: str, path: str) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert (request.method, request.url.path) == ("GET", path)
+        return httpx.Response(200, json={"items": [], "total": 0})
 
-    assert await make_client(handler).list_courses() == [{"slug": "a"}, {"slug": "b"}]
-
-
-async def test_list_tracks_unwraps_paginated_envelope() -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={"items": [{"slug": "seti"}], "total": 1, "limit": 20, "offset": 0},
-        )
-
-    assert await make_client(handler).list_tracks() == [{"slug": "seti"}]
+    assert await getattr(make_client(handler), method)() == {"items": [], "total": 0}
 
 
 async def test_get_track_returns_none_on_404() -> None:
@@ -128,45 +124,6 @@ async def test_get_track_returns_none_on_404() -> None:
     assert await make_client(handler).get_track("missing") is None
 
 
-async def test_create_track_posts_payload_and_returns_object() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.method == "POST"
-        assert request.url.path == "/authoring/tracks"
-        return httpx.Response(201, json={"id": "t1", "slug": "seti"})
-
-    result = await make_client(handler).create_track({"title": "Сети", "slug": "seti"})
-    assert result == {"id": "t1", "slug": "seti"}
-
-
-async def test_attach_course_to_track_puts_to_expected_path() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.method == "PUT"
-        assert request.url.path == "/authoring/tracks/t1/courses/c1"
-        return httpx.Response(204)
-
-    await make_client(handler).attach_course_to_track("t1", "c1")
-
-
-async def test_reorder_track_courses_puts_ordered_ids() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.method == "PUT"
-        assert request.url.path == "/authoring/tracks/t1/courses/order"
-        assert request.content == b'{"course_ids":["c2","c1"]}'
-        return httpx.Response(204)
-
-    await make_client(handler).reorder_track_courses("t1", ["c2", "c1"])
-
-
-async def test_list_problems_unwraps_paginated_envelope() -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={"items": [{"slug": "two-sum"}], "total": 1, "limit": 20, "offset": 0},
-        )
-
-    assert await make_client(handler).list_problems() == [{"slug": "two-sum"}]
-
-
 async def test_get_problem_by_slug_returns_none_on_404() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"code": "not_found", "message": "нет"})
@@ -174,14 +131,46 @@ async def test_get_problem_by_slug_returns_none_on_404() -> None:
     assert await make_client(handler).get_problem_by_slug("missing") is None
 
 
-async def test_apply_algorithm_plan_posts_to_expected_path() -> None:
+@pytest.mark.parametrize(
+    ("method", "action", "path"),
+    [
+        ("course_plan", "preview", "/authoring/course-plans/preview"),
+        ("course_plan", "apply", "/authoring/course-plans/apply"),
+        ("practice_set_plan", "apply", "/authoring/course-plans/practice-set/apply"),
+        ("track_plan", "preview", "/authoring/track-plans/preview"),
+        ("algorithm_plan", "apply", "/authoring/algorithm-plans/apply"),
+    ],
+)
+async def test_plans_post_payload_to_expected_path(method: str, action: str, path: str) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.method == "POST"
-        assert request.url.path == "/authoring/algorithm-plans/apply"
-        return httpx.Response(200, json={"created": 1, "updated": 0, "unchanged": 0})
+        assert (request.method, request.url.path) == ("POST", path)
+        assert request.content == b'{"slug":"x"}'
+        return httpx.Response(200, json={"valid": True})
 
-    result = await make_client(handler).apply_algorithm_plan({"problems": []})
-    assert result == {"created": 1, "updated": 0, "unchanged": 0}
+    result = await getattr(make_client(handler), method)(action, {"slug": "x"})
+    assert result == {"valid": True}
+
+
+async def test_algorithm_plan_can_request_template_validation() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["validate_templates"] == "true"
+        return httpx.Response(200, json={"valid": True})
+
+    await make_client(handler).algorithm_plan("apply", {}, validate_templates=True)
+
+
+async def test_invalid_plan_error_carries_issues() -> None:
+    issue = {"severity": "error", "path": "c", "code": "unknown_problem", "message": "нет"}
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            422,
+            json={"code": "invalid_plan", "message": "ошибки", "details": {"issues": [issue]}},
+        )
+
+    with pytest.raises(TramplinApiError, match="unknown_problem") as exc_info:
+        await make_client(handler).course_plan("apply", {})
+    assert exc_info.value.code == "invalid_plan"
 
 
 async def test_with_token_shares_http_client_but_not_ownership() -> None:

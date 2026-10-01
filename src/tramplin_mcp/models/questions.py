@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field
 
-from tramplin_mcp.models.common import _SLUG_DOC, SLUG_PATTERN, McpModel, Slug, _ensure_unique
+from tramplin_mcp.models.common import _SLUG_DOC, SLUG_PATTERN, McpModel, Slug
 
 
 class PlainOption(McpModel):
@@ -164,10 +164,8 @@ class QuizPlan(McpModel):
     )
     questions: list[QuestionPlan] = Field(
         default_factory=list,
-        description="Questions in display order; `position` must still be set on each.",
+        description=(
+            "Questions in display order. Matched to existing questions by `position`, which "
+            "must be unique within the quiz."
+        ),
     )
-
-    @model_validator(mode="after")
-    def unique_question_positions(self) -> Self:
-        _ensure_unique([str(question.position) for question in self.questions], "question position")
-        return self

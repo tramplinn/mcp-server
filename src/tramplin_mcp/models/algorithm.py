@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-from typing import Literal, Self
+from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from tramplin_mcp.models.common import (
     _SLUG_DOC,
     SLUG_PATTERN,
-    Change,
     McpModel,
+    McpOutput,
+    PlanReport,
     Slug,
-    ValidationIssue,
-    _ensure_unique,
 )
 
 
@@ -67,12 +66,6 @@ class ProblemPlan(McpModel):
         description="Per-language starter/solution code, matched by `language`.",
     )
 
-    @model_validator(mode="after")
-    def unique_test_case_positions(self) -> Self:
-        _ensure_unique([str(case.position) for case in self.test_cases], "test case position")
-        _ensure_unique([template.language for template in self.templates], "template language")
-        return self
-
 
 class AlgorithmPlan(McpModel):
     """The complete desired state of a flat bank of problems. Applying a plan is
@@ -83,32 +76,19 @@ class AlgorithmPlan(McpModel):
         default_factory=list, description="Problems to create or update."
     )
 
-    @model_validator(mode="after")
-    def unique_problem_slugs(self) -> Self:
-        _ensure_unique([problem.slug for problem in self.problems], "problem slug")
-        return self
 
-
-class AlgorithmPlanPreview(McpModel):
-    changes: list[Change] = Field(
-        description="Every create/update/unchanged change the plan would make."
-    )
-    creates: int = Field(description="Number of new entities the plan would create.")
-    updates: int = Field(description="Number of existing entities the plan would modify.")
-    unchanged: int = Field(description="Number of existing entities the plan leaves untouched.")
-    warnings: list[str] = Field(
-        default_factory=list, description="Non-blocking notes about applying this plan."
+class TemplateValidation(McpOutput):
+    problem_slug: str
+    language: str
+    passed: bool = Field(description="Whether the reference solution passed every test case.")
+    message: str | None = Field(default=None, description="Why it failed, if it did.")
+    details: dict[str, Any] = Field(
+        default_factory=dict, description="E.g. test_position and verdict of the failing test."
     )
 
 
-class AlgorithmPlanApplyResult(McpModel):
-    completed: bool = Field(description="Whether the plan was applied successfully.")
-    changes: list[Change] = Field(description="Every create/update/unchanged change that was made.")
-    warnings: list[str] = Field(
-        default_factory=list, description="Non-blocking notes about what was applied."
+class AlgorithmPlanReport(PlanReport):
+    template_validations: list[TemplateValidation] = Field(
+        default_factory=list,
+        description="Filled only by apply_algorithm_plan with validate_templates=true.",
     )
-
-
-class AlgorithmPlanValidation(McpModel):
-    valid: bool = Field(description="True when there are no 'error'-severity issues.")
-    issues: list[ValidationIssue] = Field(default_factory=list)

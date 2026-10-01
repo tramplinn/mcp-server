@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from tramplin_mcp.models import (
-    CoursePlan,
+    CoursePlanReport,
     FileQuestionPlan,
     GroupingQuestionPlan,
     MatchingQuestionPlan,
@@ -13,6 +13,7 @@ from tramplin_mcp.models import (
     QuizPlan,
     SingleQuestionPlan,
     TextQuestionPlan,
+    TrackPlan,
 )
 
 
@@ -21,105 +22,40 @@ def test_rejects_invalid_slug() -> None:
         ModulePlan.model_validate({"title": "M", "slug": "Not Valid"})
 
 
-def test_quiz_rejects_duplicate_question_positions() -> None:
-    with pytest.raises(ValidationError, match="position"):
-        QuizPlan.model_validate(
-            {
-                "title": "Q",
-                "slug": "q",
-                "questions": [
-                    {
-                        "position": 0,
-                        "prompt_md": "a",
-                        "type": "text",
-                        "answer": {"accepted": ["x"]},
-                    },
-                    {
-                        "position": 0,
-                        "prompt_md": "b",
-                        "type": "text",
-                        "answer": {"accepted": ["y"]},
-                    },
-                ],
-            }
-        )
+def test_plan_inputs_reject_unknown_fields() -> None:
+    with pytest.raises(ValidationError, match="extra"):
+        TrackPlan.model_validate({"title": "T", "slug": "t", "courses": ["a"]})
 
 
-def test_module_rejects_duplicate_lesson_slugs() -> None:
-    with pytest.raises(ValidationError, match="slug"):
-        ModulePlan.model_validate(
-            {
-                "title": "M",
-                "slug": "m",
-                "lessons": [
-                    {"title": "A", "slug": "intro"},
-                    {"title": "B", "slug": "intro"},
-                ],
-            }
-        )
-
-
-def test_module_content_order_must_cover_every_slug() -> None:
-    with pytest.raises(ValidationError, match="content_order"):
-        ModulePlan.model_validate(
-            {
-                "title": "M",
-                "slug": "m",
-                "lessons": [{"title": "A", "slug": "intro"}],
-                "content_order": ["intro", "missing"],
-            }
-        )
-
-
-def test_module_content_order_accepts_matching_slugs() -> None:
-    module = ModulePlan.model_validate(
+def test_reports_ignore_new_backend_fields() -> None:
+    report = CoursePlanReport.model_validate(
         {
-            "title": "M",
-            "slug": "m",
-            "lessons": [{"title": "A", "slug": "intro"}],
-            "quizzes": [{"title": "Q", "slug": "check"}],
-            "content_order": ["check", "intro"],
+            "course_slug": "c",
+            "course_id": "id-1",
+            "valid": True,
+            "created": 1,
+            "updated": 0,
+            "unchanged": 0,
+            "changes": [
+                {
+                    "action": "create",
+                    "kind": "lesson",
+                    "path": "c/m/l",
+                    "entity_id": "id-2",
+                    "fields": [],
+                    "future_field": 1,
+                }
+            ],
+            "issues": [
+                {"severity": "warning", "path": "c/m/l", "code": "empty_lesson", "message": "…"}
+            ],
+            "warnings": [],
+            "future_field": True,
         }
     )
-    assert module.content_order == ["check", "intro"]
 
-
-def test_module_rejects_duplicate_practice_set_titles() -> None:
-    with pytest.raises(ValidationError, match="title"):
-        ModulePlan.model_validate(
-            {
-                "title": "M",
-                "slug": "m",
-                "practice_sets": [{"title": "Warmup"}, {"title": "Warmup"}],
-            }
-        )
-
-
-def test_module_content_order_accepts_practice_set_titles() -> None:
-    module = ModulePlan.model_validate(
-        {
-            "title": "M",
-            "slug": "m",
-            "lessons": [{"title": "A", "slug": "intro"}],
-            "practice_sets": [{"title": "Warmup", "problem_slugs": ["two-sum"]}],
-            "content_order": ["Warmup", "intro"],
-        }
-    )
-    assert module.content_order == ["Warmup", "intro"]
-
-
-def test_course_rejects_duplicate_module_slugs() -> None:
-    with pytest.raises(ValidationError, match="module slug"):
-        CoursePlan.model_validate(
-            {
-                "title": "C",
-                "slug": "c",
-                "modules": [
-                    {"title": "A", "slug": "m"},
-                    {"title": "B", "slug": "m"},
-                ],
-            }
-        )
+    assert report.changes[0].entity_id == "id-2"
+    assert report.issues[0].code == "empty_lesson"
 
 
 @pytest.mark.parametrize(

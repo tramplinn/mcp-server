@@ -6,43 +6,66 @@ from typing import Any, cast
 from fastmcp import Context, FastMCP
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.lifespan import lifespan
+from mcp.types import ToolAnnotations
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from tramplin_mcp.algorithm_planner import (
-    apply_plan as apply_algorithm_plan_impl,
-)
-from tramplin_mcp.algorithm_planner import (
-    preview_plan as preview_algorithm_plan_impl,
-)
-from tramplin_mcp.algorithm_planner import (
-    validate_plan as validate_algorithm_plan_impl,
-)
 from tramplin_mcp.auth import build_auth
 from tramplin_mcp.client import TramplinClient
 from tramplin_mcp.config import Settings
 from tramplin_mcp.models import (
     AlgorithmPlan,
-    AlgorithmPlanApplyResult,
-    AlgorithmPlanPreview,
-    AlgorithmPlanValidation,
-    ApplyResult,
+    AlgorithmPlanReport,
     CoursePlan,
-    CoursePlanPreview,
-    CoursePlanValidation,
+    CoursePlanReport,
+    Index,
+    McpModel,
     PracticeSetPlan,
-)
-from tramplin_mcp.planner import (
-    apply_plan,
-    apply_practice_set,
-    preview_plan,
-    preview_practice_set,
-    validate_plan,
-    validate_practice_set,
+    PracticeSetPlanReport,
+    TrackPlan,
+    TrackPlanReport,
 )
 
 settings = Settings()
 auth = build_auth(settings)
+
+INSTRUCTIONS = """\
+Tramplin authoring: courses (modules with lessons, quizzes and practice sets), a flat bank of
+algorithm problems, and tracks that group courses. All logic lives in the Tramplin backend;
+this server only forwards calls.
+
+Workflow for every change:
+1. Look first: list_courses / list_tracks / list_problems, then inspect_course /
+   inspect_track / inspect_problem for anything you are going to change.
+2. preview_*_plan: runs the real apply code and rolls it back. It returns the exact diff
+   (`changes`) plus `issues`. Fix every issue with severity 'error' (look at `code` and
+   `path`) and preview again; warnings do not block.
+3. Show the user what will change, including every entry of `warnings`, then call the
+   matching apply_*_plan with the same plan. Apply re-validates; if the plan has errors it
+   fails with code invalid_plan, and the failure details list the same issues.
+
+Plan semantics:
+- Plans are idempotent and additive-only: nothing is ever deleted, and entities missing from
+  a plan are kept. Re-applying the same plan changes nothing.
+- Matching keys: course/module/lesson/quiz/problem/track by slug, practice set by title (keep
+  titles stable), question and test case by position, template by language.
+- Course plans save every course/module/lesson/quiz they mention as a draft, which unpublishes
+  published ones. Say so to the user before applying when preview warns about it. To add or
+  change a single practice set in an existing module, use apply_practice_set_plan: it does not
+  touch statuses or the order of anything else.
+- This server cannot publish. Never claim content is published; the author publishes it in
+  the Tramplin UI.
+- After apply, `changes[].entity_id` holds real ids. For example, inspect_lesson takes a lesson
+  id from there or from inspect_course.
+- Problems: apply_algorithm_plan does not run reference solutions unless
+  validate_templates=true. Without it, a clean apply says nothing about solutions passing tests.
+"""
+
+READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
+PREVIEW = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
+APPLY = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
+)
 
 
 @lifespan
@@ -56,22 +79,8 @@ async def app_lifespan(_: FastMCP) -> AsyncIterator[dict[str, TramplinClient]]:
 
 mcp = FastMCP(
     "tramplin-authoring",
-    version="0.1.0",
-    instructions=(
-        "Use inspect_course before editing existing material. Use preview_course_plan before "
-        "apply_course_plan. Plans only create or update drafts and never delete content. Never "
-        "claim that content was published: this server has no publishing tool. Tracks group "
-        "existing courses: use inspect_track before create_track/attach_course_to_track, and "
-        "attach_course_to_track (not a course plan) to add a course to a track. Problems are a "
-        "flat bank: use preview_algorithm_plan before apply_algorithm_plan; it never runs "
-        "validate_template, so a plan applying cleanly does not mean solutions pass their tests. "
-        "A module's practice_sets create or update practice sets in that module, referencing bank "
-        "problems by slug; a practice set has no slug of its own, so it is matched by title — "
-        "keep titles stable across applies to update the same set instead of creating a new one. "
-        "To add or update a single practice set in an existing course/module without restating the "
-        "rest of the course, use preview_practice_set_plan/apply_practice_set_plan instead of a "
-        "full course plan; the course and module must already exist."
-    ),
+    version="0.2.0",
+    instructions=INSTRUCTIONS,
     lifespan=app_lifespan,
     auth=auth,
 )
@@ -87,26 +96,8 @@ async def _client(ctx: Context) -> TramplinClient:
     return base.with_token(access_token.token)
 
 
-@mcp.tool
-async def list_courses(ctx: Context) -> list[dict[str, Any]]:
-    """List all courses visible to the authenticated teacher, including drafts."""
-    return await (await _client(ctx)).list_courses()
-
-
-@mcp.tool
-async def inspect_course(slug: str, ctx: Context) -> dict[str, Any]:
-    """Read the complete authoring tree for one course before proposing edits."""
-    course = await (await _client(ctx)).get_course(slug)
-    if course is None:
-        return {"found": False, "slug": slug}
-    return {"found": True, "course": cast(dict[str, Any], _omit_body_html(course))}
-
-
-@mcp.tool
-async def inspect_lesson(lesson_id: str, ctx: Context) -> dict[str, Any]:
-    """Read one lesson including its Markdown source."""
-    lesson = await (await _client(ctx)).get_lesson(lesson_id)
-    return cast(dict[str, Any], _omit_body_html(lesson))
+def _dump(model: McpModel) -> dict[str, Any]:
+    return model.model_dump(mode="json")
 
 
 def _omit_body_html(value: object) -> object:
@@ -117,133 +108,163 @@ def _omit_body_html(value: object) -> object:
     return value
 
 
-@mcp.tool
+# --- Courses ---------------------------------------------------------------------------
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def list_courses(ctx: Context) -> Index:
+    """List every course including drafts (id, slug, title, status). Not paginated."""
+    return Index.model_validate(await (await _client(ctx)).index_courses())
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def inspect_course(slug: str, ctx: Context) -> dict[str, Any]:
+    """Read a course's full authoring tree: modules and their ordered items (lessons, quizzes,
+    practice sets) with ids. Lesson bodies are omitted, so use inspect_lesson to read one."""
+    course = await (await _client(ctx)).get_course(slug)
+    if course is None:
+        return {"found": False, "slug": slug}
+    return {"found": True, "course": _omit_body_html(course)}
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def inspect_lesson(lesson_id: str, ctx: Context) -> dict[str, Any]:
+    """Read one lesson including its Markdown source (body_md). Take lesson_id from
+    inspect_course or from changes[].entity_id of an applied course plan."""
+    lesson = await (await _client(ctx)).get_lesson(lesson_id)
+    return cast(dict[str, Any], _omit_body_html(lesson))
+
+
+@mcp.tool(annotations=READ_ONLY)
 async def preview_markdown(body_md: str, ctx: Context) -> dict[str, Any]:
-    """Render lesson Markdown and extract interview cards without saving anything."""
+    """Render lesson Markdown exactly as students will see it and extract interview cards.
+    Saves nothing. Use it to check tricky Markdown before putting it into a plan."""
     return await (await _client(ctx)).preview_markdown(body_md)
 
 
-@mcp.tool
-async def preview_course_plan(plan: CoursePlan, ctx: Context) -> CoursePlanPreview:
-    """Compare a complete desired course outline with Tramplin without changing data."""
-    return await preview_plan(await _client(ctx), plan)
+@mcp.tool(annotations=PREVIEW)
+async def preview_course_plan(plan: CoursePlan, ctx: Context) -> CoursePlanReport:
+    """Dry-run a course plan. Returns the exact diff the apply would make and validation
+    issues (unknown problem slugs, broken Markdown, invalid quiz answers, …). Writes nothing."""
+    result = await (await _client(ctx)).course_plan("preview", _dump(plan))
+    return CoursePlanReport.model_validate(result)
 
 
-@mcp.tool
-async def validate_course_plan(plan: CoursePlan, ctx: Context) -> CoursePlanValidation:
-    """Validate Markdown, lesson links, question answers, and publish-readiness without writes."""
-    return await validate_plan(await _client(ctx), plan)
+@mcp.tool(annotations=APPLY)
+async def apply_course_plan(plan: CoursePlan, ctx: Context) -> CoursePlanReport:
+    """Create or update a course (modules, lessons, quizzes, practice sets) in one transaction.
+    Additive and idempotent. Everything the plan mentions is saved as a draft, which
+    unpublishes published entities. Preview first. Rejected as a whole (invalid_plan) if the
+    plan has errors."""
+    result = await (await _client(ctx)).course_plan("apply", _dump(plan))
+    return CoursePlanReport.model_validate(result)
 
 
-@mcp.tool
-async def apply_course_plan(plan: CoursePlan, ctx: Context) -> ApplyResult:
-    """Idempotently create/update a draft course, modules, and lessons; never delete or publish."""
-    return await apply_plan(await _client(ctx), plan)
+def _practice_set_payload(
+    course_slug: str, module_slug: str, practice_set: PracticeSetPlan
+) -> dict[str, Any]:
+    return {
+        "course_slug": course_slug,
+        "module_slug": module_slug,
+        "practice_set": _dump(practice_set),
+    }
 
 
-@mcp.tool
+@mcp.tool(annotations=PREVIEW)
 async def preview_practice_set_plan(
     course_slug: str, module_slug: str, practice_set: PracticeSetPlan, ctx: Context
-) -> CoursePlanPreview:
-    """Compare a desired practice set for one module with Tramplin without changing data."""
-    return await preview_practice_set(await _client(ctx), course_slug, module_slug, practice_set)
+) -> PracticeSetPlanReport:
+    """Dry-run one practice set in an existing course module. Writes nothing."""
+    payload = _practice_set_payload(course_slug, module_slug, practice_set)
+    result = await (await _client(ctx)).practice_set_plan("preview", payload)
+    return PracticeSetPlanReport.model_validate(result)
 
 
-@mcp.tool
-async def validate_practice_set_plan(
-    course_slug: str, module_slug: str, practice_set: PracticeSetPlan, ctx: Context
-) -> CoursePlanValidation:
-    """Validate a practice set's problem slugs without writes."""
-    return await validate_practice_set(await _client(ctx), course_slug, module_slug, practice_set)
-
-
-@mcp.tool
+@mcp.tool(annotations=APPLY)
 async def apply_practice_set_plan(
     course_slug: str, module_slug: str, practice_set: PracticeSetPlan, ctx: Context
-) -> ApplyResult:
-    """Idempotently create/update one draft practice set in an existing course module.
-
-    Matches by title; leaves the rest of the course/module untouched. The course and module
-    must already exist (create them with apply_course_plan first).
-    """
-    return await apply_practice_set(await _client(ctx), course_slug, module_slug, practice_set)
-
-
-@mcp.tool
-async def list_tracks(ctx: Context) -> list[dict[str, Any]]:
-    """List all tracks visible to the authenticated teacher, including drafts."""
-    return await (await _client(ctx)).list_tracks()
+) -> PracticeSetPlanReport:
+    """Create or update one practice set (matched by title) in an existing course module
+    without restating the course. A new set is appended to the end of the module. Other items,
+    their order and statuses are untouched. The course and module must already exist."""
+    payload = _practice_set_payload(course_slug, module_slug, practice_set)
+    result = await (await _client(ctx)).practice_set_plan("apply", payload)
+    return PracticeSetPlanReport.model_validate(result)
 
 
-@mcp.tool
+# --- Tracks ----------------------------------------------------------------------------
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def list_tracks(ctx: Context) -> Index:
+    """List every track including drafts (id, slug, title, status). Not paginated."""
+    return Index.model_validate(await (await _client(ctx)).index_tracks())
+
+
+@mcp.tool(annotations=READ_ONLY)
 async def inspect_track(slug: str, ctx: Context) -> dict[str, Any]:
-    """Read one track, including its attached courses, before proposing changes."""
+    """Read one track with its courses in display order."""
     track = await (await _client(ctx)).get_track(slug)
     if track is None:
         return {"found": False, "slug": slug}
     return {"found": True, "track": track}
 
 
-@mcp.tool
-async def create_track(
-    title: str,
-    slug: str,
-    ctx: Context,
-    description: str | None = None,
-    color: str | None = None,
-) -> dict[str, Any]:
-    """Create a draft track (without courses). Use attach_course_to_track to add courses to it."""
-    payload = {"title": title, "slug": slug, "description": description, "color": color}
-    return await (await _client(ctx)).create_track(payload)
+@mcp.tool(annotations=PREVIEW)
+async def preview_track_plan(plan: TrackPlan, ctx: Context) -> TrackPlanReport:
+    """Dry-run a track plan: the track itself, which courses get attached and whether the
+    course order changes. Writes nothing."""
+    result = await (await _client(ctx)).track_plan("preview", _dump(plan))
+    return TrackPlanReport.model_validate(result)
 
 
-@mcp.tool
-async def attach_course_to_track(track_id: str, course_id: str, ctx: Context) -> dict[str, bool]:
-    """Attach an existing course to an existing track. Idempotent; never removes courses."""
-    await (await _client(ctx)).attach_course_to_track(track_id, course_id)
-    return {"attached": True}
+@mcp.tool(annotations=APPLY)
+async def apply_track_plan(plan: TrackPlan, ctx: Context) -> TrackPlanReport:
+    """Create or update a track and attach/order its courses in one transaction. Additive
+    and idempotent: no course is detached, and the track's status is never changed (a new
+    track starts as a draft)."""
+    result = await (await _client(ctx)).track_plan("apply", _dump(plan))
+    return TrackPlanReport.model_validate(result)
 
 
-@mcp.tool
-async def reorder_track_courses(
-    track_id: str, course_ids: list[str], ctx: Context
-) -> dict[str, bool]:
-    """Set the display order of a track's courses; the list must include every attached course."""
-    await (await _client(ctx)).reorder_track_courses(track_id, course_ids)
-    return {"reordered": True}
+# --- Algorithm problems ----------------------------------------------------------------
 
 
-@mcp.tool
-async def list_problems(ctx: Context) -> list[dict[str, Any]]:
-    """List all algorithmic problems visible to the authenticated teacher, including drafts."""
-    return await (await _client(ctx)).list_problems()
+@mcp.tool(annotations=READ_ONLY)
+async def list_problems(ctx: Context) -> Index:
+    """List every bank problem including drafts (id, slug, title, status, difficulty)."""
+    return Index.model_validate(await (await _client(ctx)).index_problems())
 
 
-@mcp.tool
+@mcp.tool(annotations=READ_ONLY)
 async def inspect_problem(slug: str, ctx: Context) -> dict[str, Any]:
-    """Read one problem, including its test cases and language templates, before editing."""
+    """Read one problem with its test cases and language templates."""
     problem = await (await _client(ctx)).get_problem_by_slug(slug)
     if problem is None:
         return {"found": False, "slug": slug}
     return {"found": True, "problem": problem}
 
 
-@mcp.tool
-async def preview_algorithm_plan(plan: AlgorithmPlan, ctx: Context) -> AlgorithmPlanPreview:
-    """Compare a desired bank of problems with Tramplin without changing data."""
-    return await preview_algorithm_plan_impl(await _client(ctx), plan)
+@mcp.tool(annotations=PREVIEW)
+async def preview_algorithm_plan(plan: AlgorithmPlan, ctx: Context) -> AlgorithmPlanReport:
+    """Dry-run a problem bank plan: exact diff plus issues (duplicate slugs, test case
+    positions, missing external_url, missing reference solutions, …). Writes nothing."""
+    result = await (await _client(ctx)).algorithm_plan("preview", _dump(plan))
+    return AlgorithmPlanReport.model_validate(result)
 
 
-@mcp.tool
-async def validate_algorithm_plan(plan: AlgorithmPlan, ctx: Context) -> AlgorithmPlanValidation:
-    """Validate provider/URL consistency and test-case coverage without writes."""
-    return await validate_algorithm_plan_impl(await _client(ctx), plan)
-
-
-@mcp.tool
-async def apply_algorithm_plan(plan: AlgorithmPlan, ctx: Context) -> AlgorithmPlanApplyResult:
-    """Idempotently create/update draft problems, test cases, and templates; never deletes."""
-    return await apply_algorithm_plan_impl(await _client(ctx), plan)
+@mcp.tool(annotations=APPLY)
+async def apply_algorithm_plan(
+    plan: AlgorithmPlan, ctx: Context, validate_templates: bool = False
+) -> AlgorithmPlanReport:
+    """Create or update draft problems, test cases and templates in one transaction.
+    Additive and idempotent. With validate_templates=true, after saving it runs every
+    template's solution_code against the test cases and reports results in
+    template_validations. A failed validation does not roll the plan back."""
+    result = await (await _client(ctx)).algorithm_plan(
+        "apply", _dump(plan), validate_templates=validate_templates
+    )
+    return AlgorithmPlanReport.model_validate(result)
 
 
 @mcp.custom_route("/health", methods=["GET"])

@@ -6,28 +6,39 @@ Tramplin от имени преподавателя или администра�
 
 ## Что умеет
 
-- просматривать список и полное дерево курсов, треков и алгоритмических задач;
-- читать Markdown-исходник урока и проверять его рендеринг;
-- валидировать курс, связи тестов, ответы на вопросы и задачи без записи;
-- показывать декларативный diff перед изменением;
-- атомарно и идемпотентно создавать или обновлять черновики курса, модулей,
-  уроков, тестов, вопросов и наборов практики;
-- собирать треки из существующих курсов;
-- вести плоский банк алгоритмических задач (условие, тест-кейсы, шаблоны кода
-  по языкам).
+Сервер — тонкая прослойка над authoring API: вся логика (валидация, diff, применение)
+живёт в бэкенде, а MCP только пробрасывает вызовы и объясняет агенту, как ими
+пользоваться (инструкции сервера, docstring'и тулов, описания полей схем).
+
+| Тул | Ручка бэкенда |
+| --- | --- |
+| `list_courses` / `list_tracks` / `list_problems` | `GET /authoring/{courses,tracks,algorithms/problems}/index` — все сущности, без пагинации |
+| `inspect_course` / `inspect_lesson` / `inspect_track` / `inspect_problem` | `GET` дерева курса, урока, трека, задачи |
+| `preview_markdown` | `POST /authoring/markdown/preview` |
+| `preview_course_plan` / `apply_course_plan` | `POST /authoring/course-plans/{preview,apply}` |
+| `preview_practice_set_plan` / `apply_practice_set_plan` | `POST /authoring/course-plans/practice-set/{preview,apply}` |
+| `preview_track_plan` / `apply_track_plan` | `POST /authoring/track-plans/{preview,apply}` |
+| `preview_algorithm_plan` / `apply_algorithm_plan` | `POST /authoring/algorithm-plans/{preview,apply}` (`?validate_templates=true`) |
+
+`preview` прогоняет тот же код, что и `apply`, и откатывает транзакцию, поэтому diff
+совпадает с реальным результатом. Ответ любого плана одинаков: `valid`, счётчики
+`created/updated/unchanged`, `changes[]` (`action`, `kind`, `path`, `entity_id`,
+`fields`), `issues[]` (`severity`, `path`, `code`, `message`) и `warnings[]`. План с
+ошибками `apply` отклоняет целиком с кодом `invalid_plan` и теми же `details.issues`.
 
 Сервис не удаляет и не публикует материалы. Сущности сопоставляются по стабильным
-`slug` (наборы практики — по `title`); повторное применение одинакового плана не
-создаёт дубликаты. Неуказанные в плане сущности сохраняются и перемещаются в
-конец соответствующего списка.
+`slug` (наборы практики — по `title`, вопросы и тест-кейсы — по `position`, шаблоны —
+по `language`); повторное применение одинакового плана ничего не меняет. Неуказанные
+в плане сущности сохраняются. План курса сохраняет упомянутые курс, модули, уроки и
+тесты черновиками, поэтому опубликованные снимаются с публикации (об этом есть
+предупреждение). План набора практики и план трека статусы не трогают.
 
 Рекомендуемый порядок для агента:
 
-1. `inspect_course` / `inspect_track` / `inspect_problem` для существующей сущности.
-2. `validate_course_plan` или `validate_algorithm_plan`.
-3. `preview_course_plan` / `preview_algorithm_plan` и подтверждение diff преподавателем.
-4. `apply_course_plan` / `apply_algorithm_plan`; треки собираются отдельно через
-   `create_track` и `attach_course_to_track`.
+1. `list_*`, затем `inspect_*` для сущностей, которые будут меняться.
+2. `preview_*_plan`: исправить все `issues` с `severity=error` и повторить.
+3. Показать преподавателю `changes` и `warnings`.
+4. `apply_*_plan` с тем же планом.
 
 ## Подключение
 
