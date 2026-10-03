@@ -45,7 +45,7 @@ Tramplin от имени преподавателя или администра�
 Удалённый Streamable HTTP endpoint:
 
 ```text
-https://mcp.example.com/mcp
+https://mcp.tramplinn.tech/mcp
 ```
 
 Сервер использует browser OAuth самого Tramplin. Пользователь входит в обычный
@@ -64,7 +64,7 @@ refresh ротируется при каждом обмене, а отозван
 
 ```toml
 [mcp_servers.tramplin]
-url = "https://mcp.example.com/mcp"
+url = "https://mcp.tramplinn.tech/mcp"
 auth = "oauth"
 ```
 
@@ -74,7 +74,7 @@ auth = "oauth"
 ### Claude Code
 
 ```bash
-claude mcp add --transport http --scope user tramplin https://mcp.example.com/mcp
+claude mcp add --transport http --scope user tramplin https://mcp.tramplinn.tech/mcp
 claude mcp get tramplin
 ```
 
@@ -90,7 +90,7 @@ claude mcp get tramplin
   "mcpServers": {
     "tramplin": {
       "type": "http",
-      "url": "https://mcp.example.com/mcp"
+      "url": "https://mcp.tramplinn.tech/mcp"
     }
   }
 }
