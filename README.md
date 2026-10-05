@@ -1,66 +1,60 @@
 # Tramplin MCP
 
-Отдельный FastMCP-сервис для заполнения учебных материалов агентами. Сервис не
-ходит в базу данных: все чтения и записи выполняются через публичный authoring API
-Tramplin от имени преподавателя или администратора.
+A FastMCP server that lets AI agents create course content. It never touches the
+database: everything goes through Tramplin's authoring API, on behalf of a
+teacher or admin.
 
-## Что умеет
+## Tools
 
-Сервер — тонкая прослойка над authoring API: вся логика (валидация, diff, применение)
-живёт в бэкенде, а MCP только пробрасывает вызовы и объясняет агенту, как ими
-пользоваться (инструкции сервера, docstring'и тулов, описания полей схем).
+The server is a thin wrapper. Validation, diffs, and applying changes happen in
+the backend; MCP forwards calls and tells the agent how to use them.
 
-| Тул | Ручка бэкенда |
+| Tool | Backend endpoint |
 | --- | --- |
-| `list_courses` / `list_tracks` / `list_problems` | `GET /authoring/{courses,tracks,algorithms/problems}/index` — все сущности, без пагинации |
-| `inspect_course` / `inspect_lesson` / `inspect_track` / `inspect_problem` | `GET` дерева курса, урока, трека, задачи |
+| `list_courses` / `list_tracks` / `list_problems` | `GET /authoring/{courses,tracks,algorithms/problems}/index` |
+| `inspect_course` / `inspect_lesson` / `inspect_track` / `inspect_problem` | `GET` the full tree of an entity |
 | `preview_markdown` | `POST /authoring/markdown/preview` |
 | `preview_course_plan` / `apply_course_plan` | `POST /authoring/course-plans/{preview,apply}` |
 | `preview_practice_set_plan` / `apply_practice_set_plan` | `POST /authoring/course-plans/practice-set/{preview,apply}` |
 | `preview_track_plan` / `apply_track_plan` | `POST /authoring/track-plans/{preview,apply}` |
 | `preview_algorithm_plan` / `apply_algorithm_plan` | `POST /authoring/algorithm-plans/{preview,apply}` (`?validate_templates=true`) |
 
-`preview` прогоняет тот же код, что и `apply`, и откатывает транзакцию, поэтому diff
-совпадает с реальным результатом. Ответ любого плана одинаков: `valid`, счётчики
-`created/updated/unchanged`, `changes[]` (`action`, `kind`, `path`, `entity_id`,
-`fields`), `issues[]` (`severity`, `path`, `code`, `message`) и `warnings[]`. План с
-ошибками `apply` отклоняет целиком с кодом `invalid_plan` и теми же `details.issues`.
+`preview` runs the same code as `apply` and rolls back, so the diff is exactly
+what you'll get. Responses include `valid`, created/updated/unchanged counts,
+`changes`, `issues`, and `warnings`. If a plan has errors, `apply` rejects it
+entirely.
 
-Сервис не удаляет и не публикует материалы. Сущности сопоставляются по стабильным
-`slug` (наборы практики — по `title`, вопросы и тест-кейсы — по `position`, шаблоны —
-по `language`); повторное применение одинакового плана ничего не меняет. Неуказанные
-в плане сущности сохраняются. План курса сохраняет упомянутые курс, модули, уроки и
-тесты черновиками, поэтому опубликованные снимаются с публикации (об этом есть
-предупреждение). План набора практики и план трека статусы не трогают.
+Nothing gets deleted or published. Entities are matched by `slug` (practice sets
+by `title`, questions and test cases by `position`, templates by `language`), so
+applying the same plan twice is safe, and anything not in the plan stays as is.
+A course plan saves what it touches as drafts, which unpublishes them — you'll get
+a warning.
 
-Рекомендуемый порядок для агента:
+Suggested flow for an agent:
 
-1. `list_*`, затем `inspect_*` для сущностей, которые будут меняться.
-2. `preview_*_plan`: исправить все `issues` с `severity=error` и повторить.
-3. Показать преподавателю `changes` и `warnings`.
-4. `apply_*_plan` с тем же планом.
+1. `list_*`, then `inspect_*` what you're about to change.
+2. `preview_*_plan`, fix every `severity=error` issue, repeat.
+3. Show the teacher the changes and warnings.
+4. `apply_*_plan` with the same plan.
 
-## Подключение
+## Connecting
 
-Удалённый Streamable HTTP endpoint:
+Endpoint (Streamable HTTP):
 
 ```text
 https://mcp.tramplinn.tech/mcp
 ```
 
-Сервер использует browser OAuth самого Tramplin. Пользователь входит в обычный
-аккаунт Tramplin и подтверждает доступ на странице Tramplin; GitHub и Яндекс
-остаются только способами входа в основной продукт. Студент или неактивный
-пользователь получит отказ. Доступ разрешён преподавателям и администраторам.
+You sign in with your Tramplin account in the browser and approve access. Only
+teachers and admins get through.
 
-Tramplin хранит authorization grants и OAuth access/refresh-токены в PostgreSQL.
-В базе находятся только SHA-256-хэши токенов; authorization code одноразовый,
-refresh ротируется при каждом обмене, а отозванные токены помечаются отдельно.
-Обычный access JWT веб-интерфейса MCP не принимает.
+Tokens are stored in PostgreSQL as SHA-256 hashes. Authorization codes are
+single-use, refresh tokens rotate on every use, and the web app's regular JWT
+doesn't work here.
 
-### Codex CLI и IDE
+### Codex
 
-Добавьте в `~/.codex/config.toml` или в `.codex/config.toml` доверенного проекта:
+Add to `~/.codex/config.toml` or a trusted project's `.codex/config.toml`:
 
 ```toml
 [mcp_servers.tramplin]
@@ -68,8 +62,8 @@ url = "https://mcp.tramplinn.tech/mcp"
 auth = "oauth"
 ```
 
-Выполните `codex mcp login tramplin`, подтвердите доступ в браузере, затем
-проверьте подключение командами `codex mcp list` и `/mcp` внутри Codex.
+Run `codex mcp login tramplin`, approve in the browser, and check with
+`codex mcp list` or `/mcp`.
 
 ### Claude Code
 
@@ -78,12 +72,10 @@ claude mcp add --transport http --scope user tramplin https://mcp.tramplinn.tech
 claude mcp get tramplin
 ```
 
-Откройте `/mcp` внутри Claude Code и выберите Tramplin — браузер откроет OAuth
-вход. Для общей конфигурации проекта замените `--scope user` на `--scope project`.
+Then open `/mcp`, pick Tramplin, and sign in. Use `--scope project` to share the
+config with your project.
 
-### Другой MCP-клиент
-
-Для клиента с JSON-конфигурацией используйте Streamable HTTP:
+### Other clients
 
 ```json
 {
@@ -96,20 +88,18 @@ claude mcp get tramplin
 }
 ```
 
-Клиент должен поддерживать OAuth discovery, Dynamic Client Registration и PKCE.
+The client needs OAuth discovery, Dynamic Client Registration, and PKCE.
 
-## Локальный запуск
+## Running locally
 
-Нужны Python 3.14 и `uv`:
+You need Python 3.14 and `uv`. Over stdio, you can pass a short-lived JWT of a
+local user:
 
 ```bash
 cp .env.example .env.runtime
-# Для stdio можно временно передать короткий access JWT локального пользователя.
 make install
 TRAMPLIN_MCP_TRANSPORT=stdio make run
 ```
-
-Пример локального stdio-сервера:
 
 ```json
 {
@@ -132,7 +122,7 @@ TRAMPLIN_MCP_TRANSPORT=stdio make run
 }
 ```
 
-Для локального HTTP:
+Over HTTP:
 
 ```bash
 cp .env.example .env.runtime
@@ -140,23 +130,11 @@ docker network create tramplin-edge 2>/dev/null || true
 docker compose --env-file .env.runtime up -d --build --wait
 ```
 
-Endpoint будет на `http://127.0.0.1:8001/mcp`, healthcheck — на
-`http://127.0.0.1:8001/health`.
+The server is at `http://127.0.0.1:8001/mcp`, health at `/health`.
 
-## Деплой и CI/CD
+## Deployment
 
-GitLab pipeline выполняет Ruff, форматирование, mypy, gitleaks, Semgrep и Trivy;
-для веток `stage` и `main` собирает immutable image, разворачивает его по SSH и
-запускает Nuclei после деплоя.
-
-Protected CI/CD variables:
-
-- `SERVER_IP`, `SSH_PORT`, `SSH_USER`, `SSH_PRIVATE_KEY`;
-- `STAGE_ENV` и `PROD_ENV` типа File;
-- `STAGE_URL` и `PROD_URL`, например `https://mcp-stage.example.com` и
-  `https://mcp.example.com`.
-
-Содержимое environment file:
+Environment file:
 
 ```dotenv
 TRAMPLIN_API_URL=http://tramplin-stage-api:8000/api/v1
@@ -171,25 +149,22 @@ TRAMPLIN_OAUTH_CLIENT_SECRET=
 TRAMPLIN_MCP_JWT_SIGNING_KEY=
 ```
 
-Для production замените backend alias на `tramplin-prod-api`. Общая
-инфраструктура должна быть поднята первой и создать external network
-`tramplin-edge`. В её `.env` настройте `MCP_DOMAIN`, `MCP_STAGE_DOMAIN` и DNS
-A/AAAA записи обоих доменов на сервер.
+For production, use `tramplin-prod-api` as the backend host. Start `infra` first —
+it creates the `tramplin-edge` network. Set `MCP_DOMAIN` and `MCP_STAGE_DOMAIN`
+there and point both domains' DNS at the server.
 
-Для каждого окружения задайте backend-настройки с теми же client credentials:
+The backend needs matching credentials:
 
 ```dotenv
 MCP_OAUTH_CLIENT_ID=tramplin-fastmcp
-MCP_OAUTH_CLIENT_SECRET=<случайный-секрет>
+MCP_OAUTH_CLIENT_SECRET=<random-secret>
 MCP_OAUTH_REDIRECT_URI=https://<mcp-domain>/auth/callback
 ```
 
-`TRAMPLIN_OAUTH_CLIENT_SECRET` и `MCP_OAUTH_CLIENT_SECRET` должны совпадать. Это
-стандартные credentials конфиденциального OAuth-клиента между двумя сервисами;
-они не передаются пользователю, Codex или Claude Code. Отдельный вручную
-создаваемый MCP-токен и дополнительный service secret не используются.
+`TRAMPLIN_OAUTH_CLIENT_SECRET` and `MCP_OAUTH_CLIENT_SECRET` must be the same.
+It's a service-to-service secret; users and agents never see it.
 
-Локальные проверки:
+Checks:
 
 ```bash
 make check
