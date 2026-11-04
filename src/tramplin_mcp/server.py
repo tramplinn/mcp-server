@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack
 from typing import Any, cast
 
 from fastmcp import Context, FastMCP
@@ -10,7 +11,7 @@ from mcp.types import ToolAnnotations
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from tramplin_mcp.auth import build_auth
+from tramplin_mcp.auth import build_auth, build_storage
 from tramplin_mcp.client import TramplinClient
 from tramplin_mcp.config import Settings
 from tramplin_mcp.models import (
@@ -27,7 +28,8 @@ from tramplin_mcp.models import (
 )
 
 settings = Settings()
-auth = build_auth(settings)
+storage = build_storage(settings)
+auth = build_auth(settings, storage)
 
 INSTRUCTIONS = """\
 Tramplin authoring: courses (modules with lessons, quizzes and practice sets), a flat bank of
@@ -70,11 +72,13 @@ APPLY = ToolAnnotations(
 
 @lifespan
 async def app_lifespan(_: FastMCP) -> AsyncIterator[dict[str, TramplinClient]]:
-    client = TramplinClient(settings.api_url, settings.api_token, settings.request_timeout)
-    try:
+    async with AsyncExitStack() as stack:
+        if storage is not None:
+            await stack.enter_async_context(storage)
+            await storage.get("readiness", collection="health")
+        client = TramplinClient(settings.api_url, settings.api_token, settings.request_timeout)
+        stack.push_async_callback(client.close)
         yield {"client": client}
-    finally:
-        await client.close()
 
 
 mcp = FastMCP(
@@ -269,6 +273,16 @@ async def apply_algorithm_plan(
 
 @mcp.custom_route("/health", methods=["GET"])
 async def health(_: Request) -> JSONResponse:
+    return JSONResponse({"status": "ok"})
+
+
+@mcp.custom_route("/health/ready", methods=["GET"])
+async def readiness(_: Request) -> JSONResponse:
+    if storage is not None:
+        try:
+            await storage.get("readiness", collection="health")
+        except Exception:
+            return JSONResponse({"status": "unavailable"}, status_code=503)
     return JSONResponse({"status": "ok"})
 
 

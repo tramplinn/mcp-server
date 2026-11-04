@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tramplin-mcp
+data:
+  PUBLIC_HOST: mcp.tramplinn.tech
+  TRAMPLIN_API_URL: http://tramplin-api:8000/api/v1
+  TRAMPLIN_MCP_TRANSPORT: http
+  TRAMPLIN_MCP_HOST: 0.0.0.0
+  TRAMPLIN_MCP_PORT: '8001'
+  TRAMPLIN_MCP_PUBLIC_URL: https://mcp.tramplinn.tech
+  TRAMPLIN_OAUTH_BASE_URL: https://api.tramplinn.tech/api/v1
+  TRAMPLIN_OAUTH_CLIENT_ID: tramplin-mcp
+  TRAMPLIN_API_TIMEOUT: '30'

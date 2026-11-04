@@ -15,6 +15,8 @@ OAUTH_ENV = {
     "TRAMPLIN_OAUTH_BASE_URL": "http://app.test/api/v1/",
     "TRAMPLIN_MCP_PUBLIC_URL": "http://mcp.test/",
     "TRAMPLIN_OAUTH_CLIENT_SECRET": "  client-secret  ",
+    "TRAMPLIN_OAUTH_DATABASE_URL": "postgresql://mcp:test@localhost/mcp",
+    "TRAMPLIN_MCP_STORAGE_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
     "TRAMPLIN_MCP_JWT_SIGNING_KEY": "signing-key-at-least-32-bytes-long!!",
 }
 
@@ -119,3 +121,18 @@ async def test_verify_token_treats_network_error_as_invalid(introspect: Introspe
     verifier = TramplinTokenVerifier(make_settings(**OAUTH_ENV))
 
     assert await verifier.verify_token("abc") is None
+
+
+@pytest.mark.parametrize(
+    "missing", ["TRAMPLIN_OAUTH_DATABASE_URL", "TRAMPLIN_MCP_STORAGE_ENCRYPTION_KEY"]
+)
+def test_oauth_rejects_missing_storage(missing: str) -> None:
+    env = {key: value for key, value in OAUTH_ENV.items() if key != missing}
+    with pytest.raises(ValueError, match="OAuth requires PostgreSQL"):
+        build_auth(make_settings(**env))
+
+
+def test_oauth_rejects_invalid_encryption_key() -> None:
+    env = {**OAUTH_ENV, "TRAMPLIN_MCP_STORAGE_ENCRYPTION_KEY": "invalid-key"}
+    with pytest.raises(ValueError):
+        build_auth(make_settings(**env))

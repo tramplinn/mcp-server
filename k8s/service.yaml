@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tramplin-mcp
+spec:
+  selector:
+    app: tramplin-mcp
+  ports:
+  - name: http
+    port: 8001
+    targetPort: http

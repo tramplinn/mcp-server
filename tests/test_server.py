@@ -382,3 +382,18 @@ def test_main_rejects_unknown_transport(
     with pytest.raises(ValueError, match="stdio or http"):
         server.main()
     assert runs == []
+
+
+@pytest.mark.parametrize("available", [True, False])
+async def test_readiness_checks_database(monkeypatch: pytest.MonkeyPatch, available: bool) -> None:
+    from unittest.mock import AsyncMock
+
+    store = SimpleNamespace(get=AsyncMock(return_value=None))
+    if not available:
+        store.get.side_effect = ConnectionError("database unavailable")
+    monkeypatch.setattr(server, "storage", store)
+    transport = httpx.ASGITransport(app=server.mcp.http_app())
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+        response = await http.get("/health/ready")
+    assert response.status_code == (200 if available else 503)
+    store.get.assert_awaited_once_with("readiness", collection="health")

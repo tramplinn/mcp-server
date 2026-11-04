@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import BeforeValidator, Field
+from pydantic import BeforeValidator, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -42,6 +42,13 @@ class Settings(BaseSettings):
         default="", validation_alias="TRAMPLIN_OAUTH_CLIENT_SECRET"
     )
     jwt_signing_key: Stripped = Field(default="", validation_alias="TRAMPLIN_MCP_JWT_SIGNING_KEY")
+
+    oauth_database_url: SecretStr = Field(
+        default=SecretStr(""), validation_alias="TRAMPLIN_OAUTH_DATABASE_URL"
+    )
+    storage_encryption_key: SecretStr = Field(
+        default=SecretStr(""), validation_alias="TRAMPLIN_MCP_STORAGE_ENCRYPTION_KEY"
+    )
 
     @property
     def oauth_configured(self) -> bool:

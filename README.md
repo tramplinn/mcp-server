@@ -1,8 +1,9 @@
+> Production в k3s: [манифесты, настройки и порядок запуска](k8s/README.md).
+
 # Tramplin MCP
 
-A FastMCP server that lets AI agents create course content. It never touches the
-database: everything goes through Tramplin's authoring API, on behalf of a
-teacher or admin.
+A FastMCP server that lets AI agents create course content. Course content is accessed through Tramplin's authoring API on behalf of a
+teacher or admin. OAuth state is stored in a separate PostgreSQL database.
 
 ## Tools
 
@@ -96,7 +97,7 @@ You need Python 3.14 and `uv`. Over stdio, you can pass a short-lived JWT of a
 local user:
 
 ```bash
-cp .env.example .env.runtime
+cp .env.example .env
 make install
 TRAMPLIN_MCP_TRANSPORT=stdio make run
 ```
@@ -122,51 +123,14 @@ TRAMPLIN_MCP_TRANSPORT=stdio make run
 }
 ```
 
-Over HTTP:
-
-```bash
-cp .env.example .env.runtime
-docker network create tramplin-edge 2>/dev/null || true
-docker compose --env-file .env.runtime up -d --build --wait
-```
-
-The server is at `http://127.0.0.1:8001/mcp`, health at `/health`.
+For local HTTP, configure the OAuth credentials, signing key, PostgreSQL URL
+and Fernet key in `.env`, then run `TRAMPLIN_MCP_TRANSPORT=http make run`.
+The endpoint is `http://127.0.0.1:8001/mcp`, health is `/health`.
 
 ## Deployment
 
-Environment file:
+Production configuration and deployment: [k8s/README.md](k8s/README.md).
+Infra owns the separate OAuth database and role. The backend owns the shared
+OAuth client secret; MCP owns its signing and storage encryption keys.
 
-```dotenv
-TRAMPLIN_API_URL=http://tramplin-stage-api:8000/api/v1
-TRAMPLIN_API_TIMEOUT=30
-TRAMPLIN_MCP_TRANSPORT=http
-TRAMPLIN_MCP_HOST=0.0.0.0
-TRAMPLIN_MCP_PORT=8001
-TRAMPLIN_MCP_PUBLIC_URL=https://mcp-stage.example.com
-TRAMPLIN_OAUTH_BASE_URL=https://api.staging.example.com/api/v1
-TRAMPLIN_OAUTH_CLIENT_ID=tramplin-fastmcp
-TRAMPLIN_OAUTH_CLIENT_SECRET=
-TRAMPLIN_MCP_JWT_SIGNING_KEY=
-```
-
-For production, use `tramplin-prod-api` as the backend host. Start `infra` first —
-it creates the `tramplin-edge` network. Set `MCP_DOMAIN` and `MCP_STAGE_DOMAIN`
-there and point both domains' DNS at the server.
-
-The backend needs matching credentials:
-
-```dotenv
-MCP_OAUTH_CLIENT_ID=tramplin-fastmcp
-MCP_OAUTH_CLIENT_SECRET=<random-secret>
-MCP_OAUTH_REDIRECT_URI=https://<mcp-domain>/auth/callback
-```
-
-`TRAMPLIN_OAUTH_CLIENT_SECRET` and `MCP_OAUTH_CLIENT_SECRET` must be the same.
-It's a service-to-service secret; users and agents never see it.
-
-Checks:
-
-```bash
-make check
-docker compose --env-file .env.example config --quiet
-```
+Checks: `make check`.

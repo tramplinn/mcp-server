@@ -1,0 +1,130 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tramplin-mcp
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  progressDeadlineSeconds: 600
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tramplin-mcp
+  template:
+    metadata:
+      labels:
+        app: tramplin-mcp
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      imagePullSecrets:
+      - name: gitlab-registry
+      containers:
+      - name: mcp
+        image: registry.gitlab.com/tramplin1/mcp-server/mcp:REPLACE_WITH_COMMIT_SHA
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        ports:
+        - name: http
+          containerPort: 8001
+        envFrom:
+        - configMapRef:
+            name: tramplin-mcp
+        env:
+        - name: TRAMPLIN_OAUTH_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: tramplin-backend
+              key: MCP_OAUTH_CLIENT_SECRET
+        - name: TRAMPLIN_MCP_JWT_SIGNING_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tramplin-mcp
+              key: TRAMPLIN_MCP_JWT_SIGNING_KEY
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: tramplin-infra
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: tramplin-infra
+              key: POSTGRES_PORT
+        - name: POSTGRES_MCP_DB
+          valueFrom:
+            configMapKeyRef:
+              name: tramplin-infra
+              key: POSTGRES_MCP_DB
+        - name: POSTGRES_MCP_USER
+          valueFrom:
+            configMapKeyRef:
+              name: tramplin-infra
+              key: POSTGRES_MCP_USER
+        - name: POSTGRES_MCP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-mcp
+              key: password
+        - name: TRAMPLIN_OAUTH_DATABASE_URL
+          value: postgresql://$(POSTGRES_MCP_USER):$(POSTGRES_MCP_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_MCP_DB)
+        - name: TRAMPLIN_MCP_STORAGE_ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tramplin-mcp
+              key: TRAMPLIN_MCP_STORAGE_ENCRYPTION_KEY
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
+      volumes:
+      - name: tmp
+        emptyDir:
+          sizeLimit: 64Mi
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: tramplin-mcp
+              topologyKey: kubernetes.io/hostname
