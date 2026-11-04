@@ -134,13 +134,6 @@ deploy-production:
     - kubectl -n tramplin rollout status deployment/tramplin-mcp --timeout=600s
     - kubectl -n tramplin wait --for=create certificate/tramplin-mcp-tls --timeout=120s
     - kubectl -n tramplin wait --for=condition=Ready certificate/tramplin-mcp-tls --timeout=600s
-    - |
-      public_host=$(kubectl -n tramplin get configmap tramplin-mcp -o jsonpath='{.data.PUBLIC_HOST}')
-      printf 'SCAN_URL=https://%s\n' "$public_host" > deploy.env
-  artifacts:
-    reports:
-      dotenv: deploy.env
-    expire_in: 1 day
 
 nuclei-scan:
   stage: scan
@@ -150,9 +143,12 @@ nuclei-scan:
     entrypoint: [""]
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
+  before_script:
+    - apk add --no-cache yq
   script:
-    - ': "${SCAN_URL:?Deploy job must provide SCAN_URL}"'
-    - nuclei -u "$SCAN_URL" -severity critical,high,medium -tags cve,exposure,misconfiguration -jsonl -o nuclei-report.jsonl
+    - public_host=$(yq -er '.data.PUBLIC_HOST' k8s/configmap.yaml)
+    - nuclei -u "https://$public_host" -severity critical,high,medium -tags cve,exposure,misconfiguration -jsonl -o nuclei-report.jsonl
+    - test ! -s nuclei-report.jsonl
   artifacts:
     when: always
     paths: [nuclei-report.jsonl]

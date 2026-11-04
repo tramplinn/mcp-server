@@ -1,4 +1,4 @@
-> Production в k3s: [манифесты, настройки и порядок запуска](k8s/README.md).
+> Production в k3s: [манифесты, настройки и порядок запуска](k8s/).
 
 # Tramplin MCP
 
@@ -129,7 +129,7 @@ The endpoint is `http://127.0.0.1:8001/mcp`, health is `/health`.
 
 ## Deployment
 
-Production configuration and deployment: [k8s/README.md](k8s/README.md).
+Production configuration and deployment: [k8s/README.md](k8s/).
 Infra owns the separate OAuth database and role. The backend owns the shared
 OAuth client secret; MCP owns its signing and storage encryption keys.
 
