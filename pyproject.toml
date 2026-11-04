@@ -5,7 +5,7 @@ description = "Agent-friendly MCP server for Tramplin course authoring"
 requires-python = ">=3.14,<3.15"
 dependencies = [
     "py-key-value-aio[postgresql]==0.4.5",
-    "cryptography>=46,<47",
+    "cryptography>=50,<51",
     "fastmcp>=3.4.7,<4",
     "httpx>=0.28.1,<1",
     "pydantic>=2.13.5,<3",
